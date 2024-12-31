@@ -1,0 +1,15 @@
+name: assets
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - yfinance
+  - psycopg
+  - plotly
+  - mplfinance
+  - scipy
+  - seaborn
+  - conda-forge::python-kaleido
+  - ipykernel
+  - nbformat
+prefix: /Users/ZMCodi/miniforge3/envs/assets

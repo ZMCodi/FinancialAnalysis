@@ -68,8 +68,15 @@ class Asset():
         start_date = pd.to_datetime('today').date()
         asset_type = ticker.info['quoteType'].lower()
 
-        if exchange == 'NGM':
-            exchange = 'NMS'
+        # Mapping dictionary
+        exchange_mapping = {
+            'NYQ': 'NYSE',
+            'NMS': 'NASDAQ',
+            'NGM': 'NASDAQ'
+        }
+
+        # Mapped list
+        exchange = exchange_mapping.get(exchange, exchange)
 
         try:
             market_cap = ticker.info['marketCap']
@@ -80,13 +87,19 @@ class Asset():
             sector = ticker.info['sector']
         except KeyError:
             sector = None
+
+        print(f'Inserting to DB {ticker=}, {comp_name=}, {exchange=}, {currency=}, {asset_type=}, {market_cap=}, {sector=}')
             
         # Get daily data from 2020
         daily_data = yf.download(self.ticker, start='2020-01-01')
         daily_data = daily_data.droplevel(1, axis=1)
         daily_data['ticker'] = self.ticker
         clean_daily = self.clean_data(daily_data)
-        clean_daily = clean_daily.rename(columns={'Date': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Adj Close': 'adj_close', 'Volume': 'volume'})
+        clean_daily = clean_daily.rename(columns={'Date': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
+        if 'Adj Close' not in clean_daily.columns:
+            clean_daily['adj_close'] = clean_daily['close']
+        else:
+            clean_daily = clean_daily.rename(columns={'Adj Close': 'adj_close'})
         # print(f'{clean_daily.count()=}')
 
         # Get 5min data
@@ -94,7 +107,11 @@ class Asset():
         five_min_data = five_min_data.droplevel(1, axis=1)
         five_min_data['ticker'] = self.ticker
         clean_five_min = self.clean_data(five_min_data)
-        clean_five_min = clean_five_min.rename(columns={'Datetime': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Adj Close': 'adj_close', 'Volume': 'volume'})
+        clean_five_min = clean_five_min.rename(columns={'Datetime': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
+        if 'Adj Close' not in clean_five_min.columns:
+            clean_five_min['adj_close'] = clean_five_min['close']
+        else:
+            clean_five_min = clean_five_min.rename(columns={'Adj Close': 'adj_close'})
         # print(f'{clean_five_min.count()=}')
 
         # Insert to database
@@ -108,7 +125,6 @@ class Asset():
                     self.add_new_currency(cur, conn, currencies, currency)
 
                 cur.execute("INSERT INTO tickers (ticker, comp_name, exchange, sector, market_cap, start_date, currency, asset_type) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", (self.ticker, comp_name, exchange, sector, market_cap, start_date, currency, asset_type))
-                conn.commit()
 
                 BATCH_SIZE = 1000
                 batch_count = 0
@@ -634,7 +650,7 @@ class Asset():
         )
 
         # Add stats box with better styling
-        plt.text(1.02, 0.95, stats_text,
+        plt.text(0.75, 0.95, stats_text,
                 transform=ax.transAxes,
                 bbox=dict(
                     facecolor='white',
@@ -1207,7 +1223,3 @@ class Asset():
     # plot more diagrams
     # add bollinger bands to candlestick
     # simple default dashboard
-
-    
-aapl = Asset('V3AB.L')
-aapl.plot_SMA(interactive=True, bollinger_bands=True)

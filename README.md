@@ -115,7 +115,6 @@ Most visualization methods support:
 - More statistical analysis metrics
 - SMA window optimization
 - Additional technical indicators and plot types
-- Bollinger Bands integration with candlestick charts
 - Default dashboard implementation
 - Portfolio class integration for multi-asset analysis
 

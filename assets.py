@@ -263,7 +263,7 @@ class Asset():
             ax.tick_params(labelsize=10)
             plt.xticks(rotation=0)
 
-            plt.tight_layout()
+            # plt.tight_layout()
 
             ax.set_facecolor('#f8f9fa')
             fig.patch.set_facecolor('white')
@@ -309,10 +309,14 @@ class Asset():
                 fig.show()
             else:
                 fig.update_yaxes(
-                    title_text=f'Price ({self.currency})', row=subplot_idx[0], col=subplot_idx[1]
+                    title_text=f'Price ({self.currency})', 
+                    row=subplot_idx[0] if subplot_idx else None,
+                    col=subplot_idx[1] if subplot_idx else None
                 )
                 fig.update_xaxes(
-                    title_text=f'{self.ticker} Price History', row=subplot_idx[0], col=subplot_idx[1]
+                    title_text=f'{self.ticker} Price History', 
+                    row=subplot_idx[0] if subplot_idx else None,
+                    col=subplot_idx[1] if subplot_idx else None
                 )
 
             if filename is not None:
@@ -386,7 +390,7 @@ class Asset():
             ax1.grid(True, linestyle=':', color='#E0E0E0', alpha=0.6)
 
             # Add professional title with custom font
-            ax1.set_title(f"{self.ticker} Candlestick Chart{'with Volume Bars' if volume else ''}", 
+            ax1.set_title(f"{self.ticker} Candlestick Chart{' with Volume Bars' if volume else ''}", 
                         pad=20, 
                         fontsize=14, 
                         fontweight='bold',
@@ -455,7 +459,7 @@ class Asset():
                 ax1.set_xticks(range(0, len(data), step))
                 ax1.set_xticklabels(data.index[::step].strftime('%Y-%m-%d'), rotation=0)
 
-            plt.tight_layout()
+            # plt.tight_layout()
 
             if filename is not None:
                 fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
@@ -611,64 +615,146 @@ class Asset():
 
         return fig
 
-    def plot_returns_dist(self, *, log_rets=False, bins=100, filename=None, ax=None):
+    def plot_returns_dist(self, *, log_rets=False, bins=100, filename=None, 
+                        fig=None, interactive=False, subplot_idx=None, show_stats=True):
 
         data = self.daily['log_rets'] if log_rets else self.daily['rets']
         data = data.dropna()
 
-        # Set style
-        plt.style.use('seaborn-v0_8')  # Professional looking style
-
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(12, 7))
-        else:
-            fig = ax.figure
-
-        # Create histogram with improved styling
-        sns.histplot(data, 
-                    bins=bins,
-                    color='#2E86C1',  # Professional blue color
-                    alpha=0.7,  # Slight transparency
-                    edgecolor='white',  # White edges for better contrast
-                    ax=ax)
-
-        # Customize the plot
-        ax.set_title(f'{self.ticker} Returns Distribution', fontsize=14, pad=15, fontweight='bold')
-        ax.set_xlabel('Returns', fontsize=12)
-        ax.set_ylabel('Count', fontsize=12)
-
-        # Remove top and right spines
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
         # Calculate statistics
         stats_text = (
-            f'Mean: {np.mean(data):.4f}\n'
-            f'Std Dev: {np.std(data):.4f}\n'
-            f'Skewness: {stats.skew(data):.4f}\n'
+            f'Mean: {np.mean(data):.4f}{'\n' if not interactive else '<br>'}'
+            f'Std Dev: {np.std(data):.4f}{'\n' if not interactive else '<br>'}'
+            f'Skewness: {stats.skew(data):.4f}{'\n' if not interactive else '<br>'}'
             f'Kurtosis: {stats.kurtosis(data):.4f}'
         )
 
-        # Add stats box with better styling
-        plt.text(0.75, 0.95, stats_text,
-                transform=ax.transAxes,
-                bbox=dict(
-                    facecolor='white',
-                    edgecolor='#2E86C1',  # Match histogram color
-                    alpha=0.9,
-                    boxstyle='round,pad=0.5'
+        if not interactive:
+            # Set style
+            plt.style.use('seaborn-v0_8')  # Professional looking style
+
+            if fig is None:
+                standalone = True
+                fig, ax = plt.subplots(figsize=(12, 7))
+            else:
+                standalone = False
+                ax = fig.axes[subplot_idx] if subplot_idx is not None else fig.gca()
+
+            # Create histogram with improved styling
+            sns.histplot(data, 
+                        bins=bins,
+                        color='#2E86C1',  # Professional blue color
+                        alpha=0.7,  # Slight transparency
+                        edgecolor='white',  # White edges for better contrast
+                        ax=ax)
+
+            # Customize the plot
+            ax.set_title(f'{self.ticker} Returns Distribution', fontsize=14, pad=15, fontweight='bold')
+            ax.set_xlabel('Returns', fontsize=12)
+            ax.set_ylabel('Count', fontsize=12)
+
+            # Remove top and right spines
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
+            if show_stats:
+                # Add stats box with better styling
+                plt.text(0.75, 0.85, stats_text,
+                        transform=ax.transAxes,
+                        bbox=dict(
+                            facecolor='white',
+                            edgecolor='#2E86C1',  # Match histogram color
+                            alpha=0.9,
+                            boxstyle='round,pad=0.5'
+                        ),
+                        fontsize=10,
+                        verticalalignment='top')
+
+            # Add grid with lighter color
+            ax.grid(True, alpha=0.3, linestyle='--')
+
+            # Adjust layout
+            fig.subplots_adjust(hspace=0.4)
+
+            if filename is not None:
+                    fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
+
+        else:
+            standalone = False
+            if fig is None:
+                fig = go.Figure()
+                standalone = True
+
+            bins = np.linspace(data.min(), data.max(), bins + 1)
+
+            fig.add_trace(
+                go.Histogram(
+                    x=data,
+                    xbins=dict(
+                        start=bins[0],
+                        end=bins[-1],
+                        size=(bins[1] - bins[0])  # Forces exact bin width
+                    ),
+                    name=f'{self.ticker} Returns Distribution'
                 ),
-                fontsize=10,
-                verticalalignment='top')
+                row=subplot_idx[0] if subplot_idx else None,
+                col=subplot_idx[1] if subplot_idx else None
+            )
 
-        # Add grid with lighter color
-        ax.grid(True, alpha=0.3, linestyle='--')
+            xref = 'paper'
+            yref = 'paper'
+            
+            if subplot_idx:
+                xref = f'x{subplot_idx[0] if subplot_idx[0] != 1 else ''} domain'
+                yref = f'y{subplot_idx[0] if subplot_idx[0] != 1 else ''} domain'
 
-        # Adjust layout
-        plt.tight_layout()
+            if show_stats:
+                fig.add_annotation(
+                    x=0.95,
+                    y=0.95,
+                    xref=xref,
+                    yref=yref,
+                    text=stats_text,
+                    showarrow=False,
+                    font=dict(size=10),
+                    align='left',
+                    bgcolor='white',
+                    bordercolor='black',
+                    borderwidth=1,
+                    xanchor='right',  # Right-align the box
+                    yanchor='top'     # Top-align the box
+                )
 
-        if filename is not None:
-                fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
+            fig.update_layout(
+                yaxis=dict(
+                    range=[0, None],
+                    rangemode='nonnegative'
+                ),
+                bargap=0.05
+            )
+
+            if standalone:
+                fig.update_layout(
+                        title=f'{self.ticker} {'Log' if log_rets else ''} Returns Distribution',
+                        xaxis_title='Returns',
+                        yaxis_title=f'Count'
+                    )
+                
+                fig.show()
+            else:
+                fig.update_yaxes(
+                    title_text='Count',
+                    row=subplot_idx[0] if subplot_idx else None, 
+                    col=subplot_idx[1] if subplot_idx else None
+                )
+                fig.update_xaxes(
+                    title_text=f'{self.ticker} {'Log' if log_rets else ''} Returns Distribution', 
+                    row=subplot_idx[0] if subplot_idx else None, 
+                    col=subplot_idx[1] if subplot_idx else None
+                )
+
+            if filename is not None:
+                fig.write_image(filename)
 
         return fig
 
@@ -875,7 +961,7 @@ class Asset():
             plt.xticks(rotation=0)
 
             # Adjust layout
-            fig.tight_layout()
+            # fig.tight_layout()
 
             if filename is not None:
                 fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
@@ -965,11 +1051,14 @@ class Asset():
 
             if not standalone:
                 fig.update_yaxes(
-                    title_text=f'Price ({self.currency})', row=subplot_idx[0], col=subplot_idx[1]
+                    title_text=f'Price ({self.currency})',
+                    row=subplot_idx[0] if subplot_idx else None, 
+                    col=subplot_idx[1] if subplot_idx else None
                 )
                 fig.update_xaxes(
                     title_text=f'{self.ticker} Moving Average {f'with Bollinger Bands ({num_std=})' if bollinger_bands else ''}', 
-                    row=subplot_idx[0], col=subplot_idx[1]
+                    row=subplot_idx[0] if subplot_idx else None, 
+                    col=subplot_idx[1] if subplot_idx else None
                 )
             
             if standalone:
@@ -1106,7 +1195,7 @@ class Asset():
                 if show_signal:
                     ax2.get_legend().remove()  # Remove redundant legend
 
-                plt.tight_layout()
+                # plt.tight_layout()
 
                 if filename is not None:
                     fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
@@ -1221,5 +1310,5 @@ class Asset():
     # backtest SMA strategy
     # optimize SMA window
     # plot more diagrams
-    # add bollinger bands to candlestick
+    # add more technical indicators (RSI, MACD, ATR)
     # simple default dashboard

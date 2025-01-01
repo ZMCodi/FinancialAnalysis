@@ -211,7 +211,7 @@ class Asset():
             conn.commit()
 
     def plot_price_history(self, *, timeframe='1d', start_date=None, end_date=None, resample=None, 
-                           interactive=False, line=None, filename=None, fig=None, subplot_idx=None):
+                           interactive=True, line=None, filename=None, fig=None, subplot_idx=None):
         
         data = self.daily['close'] if timeframe == '1d' else self.five_minute['close']
 
@@ -326,7 +326,7 @@ class Asset():
 
 
     def plot_candlestick(self, *, start_date=None, end_date=None, timeframe='1d', 
-                         interactive=False, volume=True, resample=None,
+                         interactive=True, volume=True, resample=None,
                          filename=None, fig=None, candle_idx=None, vol_idx=None):
 
         if resample is not None:
@@ -616,7 +616,7 @@ class Asset():
         return fig
 
     def plot_returns_dist(self, *, log_rets=False, bins=100, filename=None, 
-                        fig=None, interactive=False, subplot_idx=None, show_stats=True):
+                        fig=None, interactive=True, subplot_idx=None, show_stats=True):
 
         data = self.daily['log_rets'] if log_rets else self.daily['rets']
         data = data.dropna()
@@ -865,11 +865,11 @@ class Asset():
 
         return stats
 
-    def plot_SMA(self, *, window=20, five_min=False, r=0., ewm=False, alpha=None, halflife=None, 
-                 bollinger_bands=False, num_std=2, interactive=False, filename=None, start_date=None, 
+    def plot_SMA(self, *, window=20, timeframe='1d', r=0., ewm=False, alpha=None, halflife=None, 
+                 bollinger_bands=False, num_std=2, interactive=True, filename=None, start_date=None, 
                  end_date=None, resample=None, fig=None, subplot_idx=None):
         
-        data = self.rolling_stats(window=window, five_min=five_min,
+        data = self.rolling_stats(window=window, five_min=True if timeframe != '1d' else False,
                                 r=r, ewm=ewm, alpha=alpha, halflife=halflife, 
                                 bollinger_bands=bollinger_bands, num_std=num_std)
         
@@ -1079,10 +1079,8 @@ class Asset():
     def SMA_crossover(self, *, short=20, long=50, timeframe='1d', 
                         start_date=None, end_date=None, r=0., resample=None, return_trace=False,
                         ewm=None, short_a=None, long_a=None, short_t=None, long_t=None, show_signal=True,
-                        interactive=False, filename=None, fig=None, subplot_idx=None):
+                        interactive=True, filename=None, fig=None, subplot_idx=None):
             
-            if fig and interactive:
-                raise NotImplementedError('Use `return_trace=True` to return traces')
             
             long_data = self.rolling_stats(window=long, five_min=(True if timeframe != '1d' else False),
                                     r=r, ewm=ewm, alpha=long_a, halflife=long_t,

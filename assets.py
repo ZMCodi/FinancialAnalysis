@@ -395,12 +395,19 @@ class Asset():
                         fontsize=14, 
                         fontweight='bold',
                         fontfamily='sans-serif')
+            
+            # Refine x-axis formatting
+            n_labels = 6 if standalone else 3
+            step = len(data) // n_labels
 
             # Clean up candlestick axis
             ax1.spines['top'].set_visible(False)
             ax1.spines['right'].set_visible(False)
             ax1.tick_params(labelsize=10)
             ax1.set_ylabel(f'Price ({self.currency})', fontsize=10, fontfamily='sans-serif')
+
+            ax1.set_xticks(range(0, len(data), step))
+            ax1.set_xticklabels(data.index[::step].strftime('%Y-%m-%d'), rotation=0)
 
             def format_prices(x, p):
                 if x >= 1e3:
@@ -411,7 +418,8 @@ class Asset():
             ax1.yaxis.set_major_formatter(plt.FuncFormatter(format_prices))
 
             if volume:
-                ax1.set_xticklabels([])
+                if standalone:
+                    ax1.set_xticklabels([])
                 ax2.set_facecolor('white')
 
                 colors = ['#26A69A' if close >= open else '#EF5350'
@@ -423,10 +431,6 @@ class Asset():
                         color=colors)
 
                 ax2.grid(True, linestyle=':', color='#E0E0E0', alpha=0.6)
-
-                # Refine x-axis formatting
-                n_labels = 6 if standalone else 3
-                step = len(data) // n_labels
 
                 ax2.set_xticks(range(0, len(data), step))
                 ax2.set_xticklabels(data.index[::step].strftime('%Y-%m-%d'), rotation=0)
@@ -563,32 +567,6 @@ class Asset():
             if standalone:
                 layout_updates['title'] = title
             
-
-            # Add time range selector buttons based on timeframe
-            if timeframe == '1d':
-                layout_updates['xaxis'] = dict(
-                    rangeselector=dict(
-                        buttons=list([
-                            dict(count=1, label="1M", step="month", stepmode="backward"),
-                            dict(count=6, label="6M", step="month", stepmode="backward"),
-                            dict(count=1, label="YTD", step="year", stepmode="todate"),
-                            dict(count=1, label="1y", step="year", stepmode="backward"),
-                            dict(step="all")
-                        ])
-                    )
-                )
-            else:
-                layout_updates['xaxis'] = dict(
-                    rangeselector=dict(
-                        buttons=list([
-                            dict(count=1, label="1H", step="hour", stepmode="backward"),
-                            dict(count=5, label="5H", step="hour", stepmode="backward"),
-                            dict(count=1, label="DTD", step="day", stepmode="todate"),
-                            dict(count=7, label="1w", step="day", stepmode="backward"),
-                            dict(step="all")
-                        ])
-                    )
-                )
 
             # Update y-axes labels
             if standalone:  # Single figure
@@ -1076,8 +1054,8 @@ class Asset():
 
         return df
     
-    def SMA_crossover(self, *, short=20, long=50, timeframe='1d', 
-                        start_date=None, end_date=None, r=0., resample=None, return_trace=False,
+    def SMA_crossover(self, *, short=20, long=50, timeframe='1d', start_date=None, end_date=None, r=0.,
+                        resample=None, return_trace=False, y2=2,
                         ewm=None, short_a=None, long_a=None, short_t=None, long_t=None, show_signal=True,
                         interactive=True, filename=None, fig=None, subplot_idx=None):
             
@@ -1226,14 +1204,14 @@ class Asset():
                     yaxis='y'
                 )
 
-                # Add signal line
-                trace3 = go.Scatter(
-                    x=signal.index,
-                    y=signal,
-                    line=dict(color='green', width=0.8, dash='solid'),
-                    name='Buy/Sell signal',
-                    yaxis='y2'
-                )
+                if show_signal:
+                    trace3 = go.Scatter(
+                        x=signal.index,
+                        y=signal,
+                        line=dict(color='green', width=0.8, dash='solid'),
+                        name='Buy/Sell signal',
+                        yaxis='y2'
+                    )
 
                 if return_trace:
                     if show_signal:
@@ -1241,21 +1219,37 @@ class Asset():
                     return [trace1, trace2]
 
                 # Add traces based on whether it's a subplot or not
-                fig = go.Figure()
-                fig.add_trace(trace1)
-                fig.add_trace(trace2)
+                standalone = False
+                if fig is None:
+                    standalone = True
+                    fig = go.Figure()
+                
+                fig.add_trace(trace1,
+                            row=subplot_idx[0] if subplot_idx else None,
+                            col=subplot_idx[1] if subplot_idx else None)
+                
+                fig.add_trace(trace2, 
+                            row=subplot_idx[0] if subplot_idx else None,
+                            col=subplot_idx[1] if subplot_idx else None)
 
                 if show_signal:
-                    fig.add_trace(trace3)
+                    if standalone:
+                        fig.add_trace(trace3)
+                    else:
+                        fig.add_trace(trace3,
+                                    row=subplot_idx[0] if subplot_idx else None,
+                                    col=subplot_idx[1] if subplot_idx else None,
+                                    secondary_y=True)
 
                 # Update layout with secondary y-axis
                 layout = {}
 
-                layout['title'] = dict(
-                        text=f'{self.ticker} SMA Crossover ({short}/{long})',
-                        x=0.5,
-                        y=0.95
-                    )
+                if standalone:
+                    layout['title'] = dict(
+                            text=f'{self.ticker} SMA Crossover ({short}/{long})',
+                            x=0.5,
+                            y=0.95
+                        )
                 
                 layout['xaxis'] = dict(
                         showgrid=True,
@@ -1272,15 +1266,16 @@ class Asset():
                         title=f'Price ({self.currency})',
                     )
                 
-                layout['yaxis2'] = dict(
-                        title='Signal',
-                        overlaying='y',
-                        side='right',
-                        range=[-0.1, 1.1],  # Give some padding to the 0/1 signal
-                        tickmode='array',
-                        tickvals=[0, 1],
-                        ticktext=['Sell', 'Buy']
-                    )
+                if show_signal:
+                    layout[f'yaxis{y2}'] = dict(
+                            title='Signal',
+                            overlaying='y',
+                            side='right',
+                            range=[-0.1, 1.1],  # Give some padding to the 0/1 signal
+                            tickmode='array',
+                            tickvals=[0, 1],
+                            ticktext=['Sell', 'Buy']
+                        )
                 
                 layout['legend'] = dict(
                         yanchor="bottom",
@@ -1296,8 +1291,19 @@ class Asset():
                                   plot_bgcolor='rgba(240,240,240,0.95)',
                                   hovermode='x unified')
 
-
-                fig.show()
+                if standalone:
+                    fig.show()
+                else:
+                    fig.update_yaxes(
+                        title_text=f'Price ({self.currency})',
+                        row=subplot_idx[0] if subplot_idx else None, 
+                        col=subplot_idx[1] if subplot_idx else None
+                    )
+                    fig.update_xaxes(
+                        title_text=f'{self.ticker} SMA Crossover ({short}/{long})', 
+                        row=subplot_idx[0] if subplot_idx else None, 
+                        col=subplot_idx[1] if subplot_idx else None
+                    )
 
                 if filename is not None:
                     fig.write_image(filename)

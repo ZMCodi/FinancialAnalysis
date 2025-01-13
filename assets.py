@@ -18,14 +18,23 @@ class Asset():
     def __init__(self, ticker):
         
         self.ticker = ticker
-        self.get_data()
+        self._get_data()
 
-    def get_data(self):
+    def __repr__(self):
+        return f'Asset({self.ticker!r})'
+    
+    def __eq__(self, other):
+        return self.ticker == other.ticker
+    
+    def __hash__(self):
+        return hash(self.ticker)
+
+    def _get_data(self):
         with pg.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT date, open, high, low, close, adj_close, volume FROM daily WHERE ticker = %s", (self.ticker,))
                 if cur.rowcount == 0:
-                    self.insert_new_ticker()
+                    self._insert_new_ticker()
                     cur.execute("SELECT date, open, high, low, close, adj_close, volume FROM daily WHERE ticker = %s", (self.ticker,))
 
                 data = cur.fetchall()
@@ -51,7 +60,7 @@ class Asset():
                 cur.execute("SELECT currency FROM tickers WHERE ticker = %s", (self.ticker,))
                 self.currency = cur.fetchone()[0]
     
-    def insert_new_ticker(self):
+    def _insert_new_ticker(self):
         print(f"{self.ticker} is not yet available in database. Downloading from yfinance...")
 
         # Ticker table data
@@ -94,7 +103,7 @@ class Asset():
         daily_data = yf.download(self.ticker, start='2020-01-01')
         daily_data = daily_data.droplevel(1, axis=1)
         daily_data['ticker'] = self.ticker
-        clean_daily = self.clean_data(daily_data)
+        clean_daily = self._clean_data(daily_data)
         clean_daily = clean_daily.rename(columns={'Date': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
         if 'Adj Close' not in clean_daily.columns:
             clean_daily['adj_close'] = clean_daily['close']
@@ -106,7 +115,7 @@ class Asset():
         five_min_data = yf.download(self.ticker, interval='5m')
         five_min_data = five_min_data.droplevel(1, axis=1)
         five_min_data['ticker'] = self.ticker
-        clean_five_min = self.clean_data(five_min_data)
+        clean_five_min = self._clean_data(five_min_data)
         clean_five_min = clean_five_min.rename(columns={'Datetime': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
         if 'Adj Close' not in clean_five_min.columns:
             clean_five_min['adj_close'] = clean_five_min['close']
@@ -122,7 +131,7 @@ class Asset():
 
                 # Add if new currency
                 if currency not in currencies:
-                    self.add_new_currency(cur, conn, currencies, currency)
+                    self._add_new_currency(cur, conn, currencies, currency)
 
                 cur.execute("INSERT INTO tickers (ticker, comp_name, exchange, sector, market_cap, start_date, currency, asset_type) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", (self.ticker, comp_name, exchange, sector, market_cap, start_date, currency, asset_type))
 
@@ -164,7 +173,7 @@ class Asset():
                 print(f'five_min_{rows_inserted=}')
 
 
-    def clean_data(self, df):
+    def _clean_data(self, df):
         mask = (df['High'] < df['Open']) | (df['High'] < df['Close']) | (df['Low'] > df['Open']) | (df['Low'] > df['Close'])
         clean = df[~mask].copy()
         temp = df[mask].copy()
@@ -176,7 +185,7 @@ class Asset():
 
         return clean
         
-    def add_new_currency(self, cur, conn, currencies, currency):
+    def _add_new_currency(self, cur, conn, currencies, currency):
 
         new_forex = []
         forex_ticker = []
@@ -737,7 +746,7 @@ class Asset():
         return fig
 
 
-    def resample(self, period='D', five_min=False):
+    def resample(self, period, five_min=False):
 
         if five_min:
             data = self.five_minute
@@ -759,7 +768,7 @@ class Asset():
         
         return data
 
-    def rolling_stats(self, *, window=20, five_min=False, r=0., ewm=False, alpha=None, halflife=None, bollinger_bands=False, num_std=2):
+    def _rolling_stats(self, *, window=20, five_min=False, r=0., ewm=False, alpha=None, halflife=None, bollinger_bands=False, num_std=2):
         
         if five_min:
             data = self.five_minute
@@ -797,11 +806,12 @@ class Asset():
         roll_df['sharpe'] = (excess_returns / roll_df['rets_std']) * np.sqrt(annualization_factor)
 
         if bollinger_bands:
-            roll_df = self.add_bollinger_bands(roll_df, num_std=num_std)
+            roll_df = self._add_bollinger_bands(roll_df, num_std=num_std)
 
         return roll_df
 
-    def basic_stats(self):
+    @property
+    def stats(self):
         stats = {}
 
         # return statistics
@@ -847,7 +857,7 @@ class Asset():
                  bollinger_bands=False, num_std=2, interactive=True, filename=None, start_date=None, 
                  end_date=None, resample=None, fig=None, subplot_idx=None):
         
-        data = self.rolling_stats(window=window, five_min=True if timeframe != '1d' else False,
+        data = self._rolling_stats(window=window, five_min=True if timeframe != '1d' else False,
                                 r=r, ewm=ewm, alpha=alpha, halflife=halflife, 
                                 bollinger_bands=bollinger_bands, num_std=num_std)
         
@@ -1048,23 +1058,22 @@ class Asset():
         return fig
         
 
-    def add_bollinger_bands(self, df, num_std=2):
+    def _add_bollinger_bands(self, df, num_std=2):
         df['bol_up'] = df['close_mean'] + num_std * df['close_std']
         df['bol_low'] = df['close_mean'] - num_std * df['close_std']
 
         return df
     
     def SMA_crossover(self, *, short=20, long=50, timeframe='1d', start_date=None, end_date=None, r=0.,
-                        resample=None, return_trace=False, y2=2,
-                        ewm=None, short_a=None, long_a=None, short_t=None, long_t=None, show_signal=True,
-                        interactive=True, filename=None, fig=None, subplot_idx=None):
+                        resample=None, return_trace=False, ewm=None, short_a=None, long_a=None, short_t=None, 
+                        long_t=None, show_signal=True, interactive=True, filename=None, fig=None, subplot_idx=None):
             
             
-            long_data = self.rolling_stats(window=long, five_min=(True if timeframe != '1d' else False),
+            long_data = self._rolling_stats(window=long, five_min=(True if timeframe != '1d' else False),
                                     r=r, ewm=ewm, alpha=long_a, halflife=long_t,
                                     bollinger_bands=False)
             
-            short_data = self.rolling_stats(window=short, five_min=(True if timeframe != '1d' else False),
+            short_data = self._rolling_stats(window=short, five_min=(True if timeframe != '1d' else False),
                                     r=r, ewm=ewm, alpha=short_a, halflife=short_t,
                                     bollinger_bands=False)
 
@@ -1267,7 +1276,7 @@ class Asset():
                     )
                 
                 if show_signal:
-                    layout[f'yaxis{y2}'] = dict(
+                    layout['yaxis2'] = dict(
                             title='Signal',
                             overlaying='y',
                             side='right',

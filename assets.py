@@ -576,7 +576,6 @@ class Asset():
             if standalone:
                 layout_updates['title'] = title
             
-
             # Update y-axes labels
             if standalone:  # Single figure
                 layout_updates['yaxis_title'] = f'Price ({self.currency})'
@@ -1169,7 +1168,7 @@ class Asset():
                 ax1.legend(lines, labels, 
                         bbox_to_anchor=(0.5, 1.15), loc='center', ncol=3)
                 
-                def format_prices(x, p):
+                def format_prices(x):
                     if x >= 1e3:
                         return f'{x/1e3:.1f}K'
                     else:
@@ -1318,10 +1317,13 @@ class Asset():
                     fig.write_image(filename)
 
             return fig
-    
+
     # TODO:
     # backtest SMA strategy
     # optimize SMA window
     # plot more diagrams
     # add more technical indicators (RSI, MACD, ATR)
     # simple default dashboard
+
+aapl = Asset('BTC-USD')
+aapl.SMA_crossover()

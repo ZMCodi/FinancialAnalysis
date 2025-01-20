@@ -31,8 +31,8 @@ class MA_Crossover(Strategy):
         super().__init__(asset)
         self.ptype = param_type
         self.ewm = ewm
-        self.short = eval(f'short_{param_type}')
-        self.long = eval(f'long_{param_type}')
+        self._short = eval(f'short_{param_type}')
+        self._long = eval(f'long_{param_type}')
         self._get_data()
 
     def _get_data(self):
@@ -56,6 +56,31 @@ class MA_Crossover(Strategy):
                 self.daily = df
             else:
                 self.five_min = df
+
+    @property
+    def short(self):
+        return self._short
+
+    @short.setter
+    def short(self, value):
+        self._short = value
+        self._get_data()
+
+    @property
+    def long(self):
+        return self._long
+
+    @long.setter
+    def long(self, value):
+        self.long_ = value
+        self._get_data()
+
+    def change_params(self, param_type, short, long, ewm):
+        self.ptype = param_type
+        self.short = short
+        self.long = long
+        self.ewm = ewm
+        self._get_data()
 
     def plot(self, timeframe='1d', start_date=None, end_date=None, 
             show_signal=True, fig=None, subplot_idx=None):
@@ -147,7 +172,7 @@ class MA_Crossover(Strategy):
 
         if standalone:
             layout['title'] = dict(
-                    text=f'{self.asset.ticker} SMA Crossover ({self.short}/{self.long})',
+                    text=f'{self.asset.ticker} MA Crossover ({self.short}/{self.long})',
                     x=0.5,
                     y=0.95
                 )
@@ -212,3 +237,6 @@ class MA_Crossover(Strategy):
 
     def optimize(self):
         pass
+
+# TODO:
+# implement the other methods

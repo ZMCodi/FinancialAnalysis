@@ -18,7 +18,7 @@ class Asset():
     def __init__(self, ticker):
         
         self.ticker = ticker
-        self._get_data()
+        self.__get_data()
 
     def __repr__(self):
         return f'Asset({self.ticker!r})'
@@ -29,12 +29,12 @@ class Asset():
     def __hash__(self):
         return hash(self.ticker)
 
-    def _get_data(self):
+    def __get_data(self):
         with pg.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT date, open, high, low, close, adj_close, volume FROM daily WHERE ticker = %s", (self.ticker,))
                 if cur.rowcount == 0:
-                    self._insert_new_ticker()
+                    self.__insert_new_ticker()
                     cur.execute("SELECT date, open, high, low, close, adj_close, volume FROM daily WHERE ticker = %s", (self.ticker,))
 
                 data = cur.fetchall()
@@ -60,7 +60,7 @@ class Asset():
                 cur.execute("SELECT currency FROM tickers WHERE ticker = %s", (self.ticker,))
                 self.currency = cur.fetchone()[0]
     
-    def _insert_new_ticker(self):
+    def __insert_new_ticker(self):
         print(f"{self.ticker} is not yet available in database. Downloading from yfinance...")
 
         # Ticker table data
@@ -103,7 +103,7 @@ class Asset():
         daily_data = yf.download(self.ticker, start='2020-01-01')
         daily_data = daily_data.droplevel(1, axis=1)
         daily_data['ticker'] = self.ticker
-        clean_daily = self._clean_data(daily_data)
+        clean_daily = self.__clean_data(daily_data)
         clean_daily = clean_daily.rename(columns={'Date': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
         if 'Adj Close' not in clean_daily.columns:
             clean_daily['adj_close'] = clean_daily['close']
@@ -115,7 +115,7 @@ class Asset():
         five_min_data = yf.download(self.ticker, interval='5m')
         five_min_data = five_min_data.droplevel(1, axis=1)
         five_min_data['ticker'] = self.ticker
-        clean_five_min = self._clean_data(five_min_data)
+        clean_five_min = self.__clean_data(five_min_data)
         clean_five_min = clean_five_min.rename(columns={'Datetime': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
         if 'Adj Close' not in clean_five_min.columns:
             clean_five_min['adj_close'] = clean_five_min['close']
@@ -131,7 +131,7 @@ class Asset():
 
                 # Add if new currency
                 if currency not in currencies:
-                    self._add_new_currency(cur, conn, currencies, currency)
+                    self.__add_new_currency(cur, conn, currencies, currency)
 
                 cur.execute("INSERT INTO tickers (ticker, comp_name, exchange, sector, market_cap, start_date, currency, asset_type) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", (self.ticker, comp_name, exchange, sector, market_cap, start_date, currency, asset_type))
 
@@ -173,7 +173,7 @@ class Asset():
                 print(f'five_min_{rows_inserted=}')
 
 
-    def _clean_data(self, df):
+    def __clean_data(self, df):
         mask = (df['High'] < df['Open']) | (df['High'] < df['Close']) | (df['Low'] > df['Open']) | (df['Low'] > df['Close'])
         clean = df[~mask].copy()
         temp = df[mask].copy()
@@ -185,7 +185,7 @@ class Asset():
 
         return clean
         
-    def _add_new_currency(self, cur, conn, currencies, currency):
+    def __add_new_currency(self, cur, conn, currencies, currency):
 
         new_forex = []
         forex_ticker = []

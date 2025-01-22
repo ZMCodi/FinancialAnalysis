@@ -31,12 +31,11 @@ class MA_Crossover(Strategy):
         super().__init__(asset)
         self.ptype = param_type
         self.ewm = ewm
-        self._short = eval(f'short_{param_type}')
-        self._long = eval(f'long_{param_type}')
-        self._get_data()
+        self.__short = eval(f'short_{param_type}')
+        self.__long = eval(f'long_{param_type}')
+        self.__get_data()
 
-    def _get_data(self):
-        # daily data
+    def __get_data(self):
         self.daily = pd.DataFrame(self.asset.daily['adj_close'])
         self.five_min = pd.DataFrame(self.asset.five_minute['adj_close'])
 
@@ -59,28 +58,28 @@ class MA_Crossover(Strategy):
 
     @property
     def short(self):
-        return self._short
+        return self.__short
 
     @short.setter
     def short(self, value):
-        self._short = value
-        self._get_data()
+        self.__short = value
+        self.__get_data()
 
     @property
     def long(self):
-        return self._long
+        return self.__long
 
     @long.setter
     def long(self, value):
-        self.long_ = value
-        self._get_data()
+        self.__long = value
+        self.__get_data()
 
     def change_params(self, param_type, short, long, ewm):
         self.ptype = param_type
         self.short = short
         self.long = long
         self.ewm = ewm
-        self._get_data()
+        self.__get_data()
 
     def plot(self, timeframe='1d', start_date=None, end_date=None, 
             show_signal=True, fig=None, subplot_idx=None):

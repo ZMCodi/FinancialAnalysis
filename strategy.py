@@ -1,9 +1,8 @@
 from abc import ABC, abstractmethod
-import seaborn as sns
+from itertools import product
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
 
 class Strategy(ABC):
@@ -36,6 +35,9 @@ class MA_Crossover(Strategy):
         self.__long = eval(f'long_{param_type}')
         self.__get_data()
 
+    def __str__(self):
+        return f'MA_Crossover({self.asset.ticker}, short_{self.ptype}={self.short}, long_{self.ptype}={self.long})'
+
     def __get_data(self):
         self.daily = pd.DataFrame(self.asset.daily['adj_close'])
         self.five_min = pd.DataFrame(self.asset.five_minute['adj_close'])
@@ -52,8 +54,7 @@ class MA_Crossover(Strategy):
             else:
                 df['short'] = df['adj_close'].rolling(window=self.short).mean()
                 df['long'] = df['adj_close'].rolling(window=self.long).mean()
-            df['signal'] = (df.short > df.long).astype(int)
-            df['signal'] = np.where(df['signal'] == 0, -1, 1)
+            df['signal'] = np.where(df['short'] > df['long'], 1, -1)
             if i == 0:
                 self.daily = df
             else:
@@ -77,11 +78,12 @@ class MA_Crossover(Strategy):
         self.__long = value
         self.__get_data()
 
-    def change_params(self, param_type, short, long, ewm):
+    def change_params(self, param_type, short, long, ewm=None):
         self.ptype = param_type
         self.short = short
         self.long = long
-        self.ewm = ewm
+        if ewm is not None:
+            self.ewm = ewm
         self.__get_data()
 
     def plot(self, timeframe='1d', start_date=None, end_date=None, 
@@ -223,12 +225,12 @@ class MA_Crossover(Strategy):
             fig.show()
         else:
             fig.update_yaxes(
-                title_text=f'Price ({self.currency})',
+                title_text=f'Price ({self.asset.currency})',
                 row=subplot_idx[0] if subplot_idx else None, 
                 col=subplot_idx[1] if subplot_idx else None
             )
             fig.update_xaxes(
-                title_text=f'{self.ticker} MA Crossover ({self.short}/{self.long})', 
+                title_text=f'{self.asset.ticker} MA Crossover ({self.short}/{self.long})', 
                 row=subplot_idx[0] if subplot_idx else None, 
                 col=subplot_idx[1] if subplot_idx else None
             )
@@ -237,7 +239,7 @@ class MA_Crossover(Strategy):
 
     def backtest(self, plot=True, timeframe='1d', start_date=None, end_date=None, 
             show_signal=True, fig=None, subplot_idx=None):
-        
+
         df = self.daily if timeframe == '1d' else self.five_min
         df['returns'] = np.log(df['adj_close'] / df['adj_close'].shift(1))
         df['strategy'] = np.log(df['adj_close'] / df['adj_close'].shift(1)) * df['signal']
@@ -364,15 +366,59 @@ class MA_Crossover(Strategy):
                     col=subplot_idx[1] if subplot_idx else None
                 )
                 fig.update_xaxes(
-                    title_text=f'{self.ticker} MA Crossover Backtest ({self.short}/{self.long})', 
+                    title_text=f'{self.asset.ticker} MA Crossover Backtest ({self.short}/{self.long})', 
                     row=subplot_idx[0] if subplot_idx else None, 
                     col=subplot_idx[1] if subplot_idx else None
                 )
 
         return np.exp(df[['returns', 'strategy']].sum())
 
-    def optimize(self):
-        pass
+    def optimize(self, inplace=False, timeframe='1d', start_date=None, end_date=None,
+                 short_range=None, long_range=None):
+
+        if short_range is None:
+            if self.ptype == 'window':
+                short_range = np.arange(20, 61, 5)  # window
+            else:
+                short_range = np.arange(0.05, 0.31, 0.05)  # alpha
+                if self.ptype == 'halflife':
+                    short_range = -np.log(2) / np.log(1 - short_range)  # halflife
+
+        if long_range is None:
+            if self.ptype == 'window':
+                long_range = np.arange(180, 281, 10)
+            else:
+                long_range = np.arange(0.01, 0.11, 0.02)  # alpha
+                if self.ptype == 'halflife':
+                    long_range = -np.log(2) / np.log(1 - long_range)  # halflife
+
+        old_params = {'short': self.short, 'long': self.long, 'ewm': self.ewm, 'param_type': self.ptype}
+
+        results = []
+        for short, long in product(short_range, long_range):
+            self.change_params('window', short, long)
+            results.append((short, long, self.backtest(plot=False, 
+                                                       timeframe=timeframe, 
+                                                       start_date=start_date,
+                                                       end_date=end_date).iloc[-1]))
+
+        results = pd.DataFrame(results, columns=['short', 'long', 'returns'])
+        results = results.sort_values(by='returns', ascending=False)
+
+        opt_short = results.iloc[0]['short']
+        opt_long = results.iloc[0]['long']
+
+        if self.ptype == 'window':
+            opt_short = int(opt_short)
+            opt_long = int(opt_long)
+
+        if inplace:
+            self.short = opt_short
+            self.long = opt_long
+        else:
+            self.change_params(**old_params)
+
+        return results
 
 # TODO:
 # implement the other methods

@@ -216,8 +216,7 @@ class MA_Crossover(Strategy):
         self.ptype = param_type
         self.short = short
         self.long = long
-        if ewm is not None:
-            self.ewm = ewm
+        self.ewm = ewm if ewm is not None else self.ewm
         self.__get_data()
 
     def plot(self, timeframe='1d', start_date=None, end_date=None, 
@@ -419,13 +418,16 @@ class RSI(Strategy):
     def __init__(self, asset, ub=70, lb=30, window=14, switch='re', m_rev=True, m_rev_bound=50):
 
         super().__init__(asset)
-        self.ub = ub
-        self.lb = lb
+        self.__ub = ub
+        self.__lb = lb
         self.window = window
         self.switch = switch
         self.m_rev = m_rev
-        self.m_rev_bound = m_rev_bound
+        self.__m_rev_bound = m_rev_bound
         self.__get_data()
+
+    def __str__(self):
+        return f'RSI({self.asset.ticker}, ub={self.ub}, lb={self.lb}, window={self.window}, switch={self.switch}, m_rev={self.m_rev}, m_rev_bound={self.m_rev_bound})'
 
     def __get_data(self):
         self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
@@ -477,6 +479,42 @@ class RSI(Strategy):
                 self.daily = df
             else:
                 self.five_min = df
+
+    @property
+    def ub(self):
+        return self.__ub
+
+    @ub.setter
+    def ub(self, value):
+        self.__ub = value
+        self.__get_data()
+
+    @property
+    def lb(self):
+        return self.__lb
+
+    @lb.setter
+    def lb(self, value):
+        self.__lb = value
+        self.__get_data()
+
+    @property
+    def m_rev_bound(self):
+        return self.__m_rev_bound
+
+    @m_rev_bound.setter
+    def m_rev_bound(self, value):
+        self.__m_rev_bound = value
+        self.__get_data()
+
+    def change_params(self, ub, lb, window=None, switch=None, m_rev=None, m_rev_bound=None):
+        self.ub = ub
+        self.lb = lb
+        self.window = window if window is not None else self.window
+        self.switch = switch if switch is not None else self.switch
+        self.m_rev = m_rev if m_rev is not None else self.m_rev
+        self.m_rev_bound = m_rev_bound if m_rev_bound is not None else self.m_rev_bound
+        self.__get_data()
 
     def plot(self, timeframe='1d', start_date=None, end_date=None, rsi=True,
             candlestick=True, show_signal=True):

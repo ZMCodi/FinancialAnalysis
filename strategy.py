@@ -422,6 +422,65 @@ class MA_Crossover(Strategy):
 
         return results
 
+
+class RSI(Strategy):
+
+    def __init__(self, asset, ub=70, lb=30, window=14, switch='re', m_rev=True):
+
+        super().__init__(asset)
+        self.ub = ub
+        self.lb = lb
+        self.window = window
+        self.switch = switch
+        self.m_rev = m_rev
+        self.__get_data()
+
+    def __get_data(self):
+        self.daily = self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']]
+        self.five_min = self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']]
+
+        for i, timeframe in enumerate([self.daily, self.five_min]):
+            df = timeframe
+            delta = df['adj_close'].diff()
+            gain = (delta.where(delta > 0, 0)).ewm(alpha=1/self.window, min_periods=self.window).mean()
+            loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/self.window, min_periods=self.window).mean()
+            rs = gain / loss
+            df['rsi'] = 100 - (100 / (1 + rs))
+            df.dropna(inplace=True)
+
+            if self.switch == 're':
+                df['signal'] = np.where(
+                    np.logical_and(df['rsi'].shift(1) > self.ub, df['rsi'] < ub), -1,
+                    np.where(np.logical_and(df['rsi'].shift(1) < self.lb, df['rsi'] > self.lb), 1, np.nan)
+                )
+            else:
+                df['signal'] = np.where(
+                    df['rsi'] > self.ub, -1,
+                    np.where(df['rsi'] < self.lb, 1, np.nan)
+                )
+
+            if np.isnan(df['signal'].iloc[0]):
+                idx = df.index[0]
+                df.loc[idx, 'signal'] = 1
+            df['signal'] = df['signal'].ffill().astype(int)
+
+            df.rename(columns=dict(log_rets='returns'), inplace=True)
+            df['strategy'] = df['returns'] * df['signal']
+
+            if i == 0:
+                self.daily = df
+            else:
+                self.five_min = df
+
+    def backtest(self):
+        pass
+
+    def optimize(self):
+        pass
+
+    def plot(self):
+        pass
+
 # TODO:
 # parrallelize backtest and optimize methods
 # add RSI and MACD strategies

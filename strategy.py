@@ -93,25 +93,18 @@ class MA_Crossover(Strategy):
 
         df = self.daily if timeframe == '1d' else self.five_min
 
+        if start_date is not None:
+            df = df[df.index >= start_date]
+        if end_date is not None:
+            df = df[df.index <= end_date]
+
+        df.dropna(inplace=True)
+
         long_data = df['long']
         short_data = df['short']
 
-        if start_date is not None:
-            long_data = long_data[long_data.index >= start_date]
-            short_data = short_data[short_data.index >= start_date]
-        if end_date is not None:
-            long_data = long_data[long_data.index <= end_date]
-            short_data = short_data[short_data.index <= end_date]
-
-        long_data = long_data.dropna()
-        short_data = short_data.dropna()
-
-        common_index = long_data.index.intersection(short_data.index)
-        long_data = long_data.reindex(common_index)
-        short_data = short_data.reindex(common_index)
-
         if show_signal:
-            signal = df['signal'].reindex(common_index)
+            signal = df['signal']
 
         short_param = f'{self.ptype}={self.short}'
         long_param = f'{self.ptype}={self.long}'

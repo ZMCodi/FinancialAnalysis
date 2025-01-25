@@ -1,6 +1,7 @@
 name: assets
 channels:
   - conda-forge
+  - anaconda
 dependencies:
   - python=3.13
   - yfinance
@@ -12,4 +13,7 @@ dependencies:
   - conda-forge::python-kaleido
   - ipykernel
   - nbformat
+  - scikit-optimize
+  - deap
+  - pyswarms
 prefix: /Users/ZMCodi/miniforge3/envs/assets

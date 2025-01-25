@@ -39,8 +39,8 @@ class MA_Crossover(Strategy):
         return f'MA_Crossover({self.asset.ticker}, short_{self.ptype}={self.short}, long_{self.ptype}={self.long})'
 
     def __get_data(self):
-        self.daily = pd.DataFrame(self.asset.daily['adj_close'])
-        self.five_min = pd.DataFrame(self.asset.five_minute['adj_close'])
+        self.daily = pd.DataFrame(self.asset.daily[['adj_close', 'log_rets']])
+        self.five_min = pd.DataFrame(self.asset.five_minute[['adj_close', 'log_rets']])
 
         for i, timeframe in enumerate([self.daily, self.five_min]):
             df = timeframe
@@ -55,6 +55,8 @@ class MA_Crossover(Strategy):
                 df['short'] = df['adj_close'].rolling(window=self.short).mean()
                 df['long'] = df['adj_close'].rolling(window=self.long).mean()
             df['signal'] = np.where(df['short'] > df['long'], 1, -1)
+            df.rename(columns=dict(log_rets='returns'), inplace=True)
+            df['strategy'] = df['returns'] * df['signal']
             if i == 0:
                 self.daily = df
             else:
@@ -241,8 +243,6 @@ class MA_Crossover(Strategy):
             show_signal=True, fig=None, subplot_idx=None):
 
         df = self.daily if timeframe == '1d' else self.five_min
-        df['returns'] = np.log(df['adj_close'] / df['adj_close'].shift(1))
-        df['strategy'] = np.log(df['adj_close'] / df['adj_close'].shift(1)) * df['signal']
         df.dropna(inplace=True)
 
         if start_date is not None:
@@ -386,7 +386,7 @@ class MA_Crossover(Strategy):
 
         if long_range is None:
             if self.ptype == 'window':
-                long_range = np.arange(180, 281, 10)
+                long_range = np.arange(100, 281, 10)
             else:
                 long_range = np.arange(0.01, 0.11, 0.02)  # alpha
                 if self.ptype == 'halflife':
@@ -396,14 +396,16 @@ class MA_Crossover(Strategy):
 
         results = []
         for short, long in product(short_range, long_range):
-            self.change_params('window', short, long)
-            results.append((short, long, self.backtest(plot=False, 
-                                                       timeframe=timeframe, 
-                                                       start_date=start_date,
-                                                       end_date=end_date).iloc[-1]))
+            self.change_params(self.ptype, short, long)
+            backtest_results = self.backtest(plot=False, 
+                                        timeframe=timeframe, 
+                                        start_date=start_date,
+                                        end_date=end_date)
+            results.append((short, long, backtest_results['returns'], backtest_results['strategy']))
 
-        results = pd.DataFrame(results, columns=['short', 'long', 'returns'])
-        results = results.sort_values(by='returns', ascending=False)
+        results = pd.DataFrame(results, columns=['short', 'long', 'hold_returns', 'strategy_returns'])
+        results['net'] = results['strategy_returns'] - results['hold_returns']
+        results = results.sort_values(by='net', ascending=False)
 
         opt_short = results.iloc[0]['short']
         opt_long = results.iloc[0]['long']
@@ -421,4 +423,11 @@ class MA_Crossover(Strategy):
         return results
 
 # TODO:
-# implement the other methods
+# parrallelize backtest and optimize methods
+# add RSI and MACD strategies
+# add transaction costs
+# add risk management
+# add algo to reduce number of trades (e.g. minimum holding period, dead zone, trend filter)
+# add more backtest metrics (e.g. Sharpe ratio, drawdown, max drawdown, win/loss ratio, etc.)
+# add more optimization methods (e.g. genetic algorithm, particle swarm optimization, bayesian, walk-forward, rolling)
+# add documentation (ugh)

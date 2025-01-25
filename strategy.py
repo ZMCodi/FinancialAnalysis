@@ -15,12 +15,142 @@ class Strategy(ABC):
         pass
 
     @abstractmethod
-    def backtest(self):
-        pass
-
-    @abstractmethod
     def optimize(self):
         pass
+
+    def backtest(self, plot=True, timeframe='1d', start_date=None, end_date=None, 
+            show_signal=True, fig=None, subplot_idx=None):
+
+        name = self.__class__.__name__
+        df = self.daily if timeframe == '1d' else self.five_min
+        df.dropna(inplace=True)
+
+        if start_date is not None:
+            df = df[df.index >= start_date]
+        if end_date is not None:
+            df = df[df.index <= end_date]
+
+        if plot:
+            trace1 = go.Scatter(
+                x=df.index,
+                y=np.exp(df['returns'].cumsum()),
+                line=dict(
+                    color='#2962FF',
+                    width=2,
+                    dash='solid'
+                ),
+                name=f'{self.asset.ticker} Hold Returns',
+                yaxis='y'
+            )
+
+            trace2 = go.Scatter(
+                x=df.index,
+                y=np.exp(df['strategy'].cumsum()),
+                line=dict(
+                    color='red',
+                    width=2,
+                    dash='solid'
+                ),
+                name=f'{self.asset.ticker} Strategy Returns',
+                yaxis='y'
+            )
+
+            if show_signal:
+                trace3 = go.Scatter(
+                    x=df.index,
+                    y=df['signal'],
+                    line=dict(color='green', width=0.8, dash='solid'),
+                    name='Buy/Sell signal',
+                    yaxis='y2'
+                )
+
+            # Add traces based on whether it's a subplot or not
+            standalone = False
+            if fig is None:
+                standalone = True
+                fig = go.Figure()
+
+            fig.add_trace(trace1,
+                        row=subplot_idx[0] if subplot_idx else None,
+                        col=subplot_idx[1] if subplot_idx else None)
+
+            fig.add_trace(trace2, 
+                        row=subplot_idx[0] if subplot_idx else None,
+                        col=subplot_idx[1] if subplot_idx else None)
+
+            if show_signal:
+                if standalone:
+                    fig.add_trace(trace3)
+                else:
+                    fig.add_trace(trace3,
+                                row=subplot_idx[0] if subplot_idx else None,
+                                col=subplot_idx[1] if subplot_idx else None,
+                                secondary_y=True)
+
+            # Update layout with secondary y-axis
+            layout = {}
+
+            if standalone:
+                layout['title'] = dict(
+                        text=f'{self.asset.ticker} {name} Backtest ({self.p1}/{self.p2})',
+                        x=0.5,
+                        y=0.95
+                    )
+
+            layout['xaxis'] = dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    title=None,
+                )
+
+            layout['yaxis'] = dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    title=f'Returns',
+                )
+
+            if show_signal:
+                layout['yaxis2'] = dict(
+                        title='Signal',
+                        overlaying='y',
+                        side='right',
+                        range=[-1.1, 1.1],
+                        tickmode='array',
+                        tickvals=[-1, 1],
+                        ticktext=['Sell', 'Buy']
+                    )
+
+            layout['legend'] = dict(
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5,
+                    orientation="h",
+                    bgcolor='rgba(255,255,255,0.8)'
+                )
+
+            fig.update_layout(**layout,
+                                paper_bgcolor='white',
+                                plot_bgcolor='rgba(240,240,240,0.95)',
+                                hovermode='x unified')
+
+            if standalone:
+                fig.show()
+            else:
+                fig.update_yaxes(
+                    title_text=f'Returns',
+                    row=subplot_idx[0] if subplot_idx else None, 
+                    col=subplot_idx[1] if subplot_idx else None
+                )
+                fig.update_xaxes(
+                    title_text=f'{self.asset.ticker} {name} Backtest ({self.p1}/{self.p2})', 
+                    row=subplot_idx[0] if subplot_idx else None, 
+                    col=subplot_idx[1] if subplot_idx else None
+                )
+
+        return np.exp(df[['returns', 'strategy']].sum())
 
 
 class MA_Crossover(Strategy):
@@ -41,6 +171,8 @@ class MA_Crossover(Strategy):
     def __get_data(self):
         self.daily = pd.DataFrame(self.asset.daily[['adj_close', 'log_rets']])
         self.five_min = pd.DataFrame(self.asset.five_minute[['adj_close', 'log_rets']])
+        self.p1 = self.short
+        self.p2 = self.long
 
         for i, timeframe in enumerate([self.daily, self.five_min]):
             df = timeframe
@@ -232,140 +364,6 @@ class MA_Crossover(Strategy):
 
         return fig
 
-    def backtest(self, plot=True, timeframe='1d', start_date=None, end_date=None, 
-            show_signal=True, fig=None, subplot_idx=None):
-
-        df = self.daily if timeframe == '1d' else self.five_min
-        df.dropna(inplace=True)
-
-        if start_date is not None:
-            df = df[df.index >= start_date]
-        if end_date is not None:
-            df = df[df.index <= end_date]
-
-        if plot:
-            trace1 = go.Scatter(
-                x=df.index,
-                y=np.exp(df['returns'].cumsum()),
-                line=dict(
-                    color='#2962FF',
-                    width=2,
-                    dash='solid'
-                ),
-                name=f'{self.asset.ticker} Hold Returns',
-                yaxis='y'
-            )
-
-            # Add long MA line
-            trace2 = go.Scatter(
-                x=df.index,
-                y=np.exp(df['strategy'].cumsum()),
-                line=dict(
-                    color='red',
-                    width=2,
-                    dash='solid'
-                ),
-                name=f'{self.asset.ticker} Strategy Returns',
-                yaxis='y'
-            )
-
-            if show_signal:
-                trace3 = go.Scatter(
-                    x=df.index,
-                    y=df['signal'],
-                    line=dict(color='green', width=0.8, dash='solid'),
-                    name='Buy/Sell signal',
-                    yaxis='y2'
-                )
-
-            # Add traces based on whether it's a subplot or not
-            standalone = False
-            if fig is None:
-                standalone = True
-                fig = go.Figure()
-
-            fig.add_trace(trace1,
-                        row=subplot_idx[0] if subplot_idx else None,
-                        col=subplot_idx[1] if subplot_idx else None)
-
-            fig.add_trace(trace2, 
-                        row=subplot_idx[0] if subplot_idx else None,
-                        col=subplot_idx[1] if subplot_idx else None)
-
-            if show_signal:
-                if standalone:
-                    fig.add_trace(trace3)
-                else:
-                    fig.add_trace(trace3,
-                                row=subplot_idx[0] if subplot_idx else None,
-                                col=subplot_idx[1] if subplot_idx else None,
-                                secondary_y=True)
-
-            # Update layout with secondary y-axis
-            layout = {}
-
-            if standalone:
-                layout['title'] = dict(
-                        text=f'{self.asset.ticker} MA Crossover Backtest ({self.short}/{self.long})',
-                        x=0.5,
-                        y=0.95
-                    )
-
-            layout['xaxis'] = dict(
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='rgba(128,128,128,0.2)',
-                    title=None,
-                )
-
-            layout['yaxis'] = dict(
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='rgba(128,128,128,0.2)',
-                    title=f'Returns',
-                )
-
-            if show_signal:
-                layout['yaxis2'] = dict(
-                        title='Signal',
-                        overlaying='y',
-                        side='right',
-                        range=[-1.1, 1.1],
-                        tickmode='array',
-                        tickvals=[-1, 1],
-                        ticktext=['Sell', 'Buy']
-                    )
-
-            layout['legend'] = dict(
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="center",
-                    x=0.5,
-                    orientation="h",
-                    bgcolor='rgba(255,255,255,0.8)'
-                )
-
-            fig.update_layout(**layout,
-                                paper_bgcolor='white',
-                                plot_bgcolor='rgba(240,240,240,0.95)',
-                                hovermode='x unified')
-
-            if standalone:
-                fig.show()
-            else:
-                fig.update_yaxes(
-                    title_text=f'Returns',
-                    row=subplot_idx[0] if subplot_idx else None, 
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-                fig.update_xaxes(
-                    title_text=f'{self.asset.ticker} MA Crossover Backtest ({self.short}/{self.long})', 
-                    row=subplot_idx[0] if subplot_idx else None, 
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-
-        return np.exp(df[['returns', 'strategy']].sum())
-
     def optimize(self, inplace=False, timeframe='1d', start_date=None, end_date=None,
                  short_range=None, long_range=None):
 
@@ -432,6 +430,9 @@ class RSI(Strategy):
     def __get_data(self):
         self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
         self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
+
+        self.p1 = self.ub
+        self.p2 = self.lb
 
         for i, timeframe in enumerate([self.daily, self.five_min]):
             df = timeframe
@@ -537,7 +538,7 @@ class RSI(Strategy):
                         yaxis='y2'
             )
 
-        fig.add_trace(price, row=1, col=1)
+        fig.add_trace(price, row=1 if rsi else None, col=1 if rsi else None)
 
         if rsi:
             fig.add_trace(RSI, row=2, col=1)
@@ -545,7 +546,10 @@ class RSI(Strategy):
             fig.add_hline(y=self.lb, row=2, col=1)
 
         if show_signal:
-            fig.add_trace(signal, row=1, col=1, secondary_y=True)
+            fig.add_trace(signal,
+                        row=1 if rsi else None, 
+                        col=1 if rsi else None, 
+                        secondary_y=True if rsi else None)
 
         layout = {}
 
@@ -607,9 +611,6 @@ class RSI(Strategy):
         fig.show()
 
         return fig
-
-    def backtest(self):
-        pass
 
     def optimize(self):
         pass

@@ -425,7 +425,7 @@ class MA_Crossover(Strategy):
 
 class RSI(Strategy):
 
-    def __init__(self, asset, ub=70, lb=30, window=14, switch='re', m_rev=True):
+    def __init__(self, asset, ub=70, lb=30, window=14, switch='re', m_rev=True, m_rev_bound=50):
 
         super().__init__(asset)
         self.ub = ub
@@ -433,6 +433,7 @@ class RSI(Strategy):
         self.window = window
         self.switch = switch
         self.m_rev = m_rev
+        self.m_rev_bound = m_rev_bound
         self.__get_data()
 
     def __get_data(self):
@@ -450,7 +451,7 @@ class RSI(Strategy):
 
             if self.switch == 're':
                 df['signal'] = np.where(
-                    np.logical_and(df['rsi'].shift(1) > self.ub, df['rsi'] < ub), -1,
+                    np.logical_and(df['rsi'].shift(1) > self.ub, df['rsi'] < self.ub), -1,
                     np.where(np.logical_and(df['rsi'].shift(1) < self.lb, df['rsi'] > self.lb), 1, np.nan)
                 )
             else:
@@ -464,6 +465,17 @@ class RSI(Strategy):
                 df.loc[idx, 'signal'] = 1
             df['signal'] = df['signal'].ffill().astype(int)
 
+            if self.m_rev:
+                if self.switch == 're':
+                    short_entries = np.logical_and(df['rsi'].shift(1) > self.ub, df['rsi'] < self.ub)
+                else:
+                    short_entries = np.logical_and(df['rsi'].shift(1) <= self.ub, df['rsi'] > self.ub)
+
+                mean_rev_points = np.logical_and(df['rsi'] <= self.m_rev_bound, df['signal'] == -1)
+                groups = short_entries.cumsum()
+                mean_rev_triggered = mean_rev_points.groupby(groups).cummax()
+                df['signal'] = np.where(mean_rev_triggered, 1, df['signal'])                    
+
             df.rename(columns=dict(log_rets='returns'), inplace=True)
             df['strategy'] = df['returns'] * df['signal']
 
@@ -472,14 +484,17 @@ class RSI(Strategy):
             else:
                 self.five_min = df
 
+    def plot(self, timeframe='1d', start_date=None, end_date=None,
+            candlestick=True, show_signal=True, fig=None, subplot_idx=None):
+
+        df = self.daily if timeframe == '1d' else self.five_min
+
     def backtest(self):
         pass
 
     def optimize(self):
         pass
 
-    def plot(self):
-        pass
 
 # TODO:
 # parrallelize backtest and optimize methods

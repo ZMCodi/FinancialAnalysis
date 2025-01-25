@@ -405,8 +405,7 @@ class MA_Crossover(Strategy):
             opt_long = int(opt_long)
 
         if inplace:
-            self.short = opt_short
-            self.long = opt_long
+            self.change_params(self.ptype, opt_short, opt_long)
         else:
             self.change_params(**old_params)
 
@@ -650,8 +649,45 @@ class RSI(Strategy):
 
         return fig
 
-    def optimize(self):
-        pass
+    def optimize(self, inplace=False, timeframe='1d', start_date=None, end_date=None,
+                ub_range=None, lb_range=None, window_range=None, m_rev_bound_range=None):
+
+        if ub_range is None:
+            ub_range = np.arange(60, 81, 5)
+        if lb_range is None:
+            lb_range = np.arange(20, 41, 5)
+        if window_range is None:
+            window_range = np.arange(10, 31, 5)
+        if m_rev_bound_range is None:
+            m_rev_bound_range = np.arange(40, 61, 5)
+
+        old_params = {'ub': self.ub, 'lb': self.lb, 'window': self.window,
+                    'switch': self.switch, 'm_rev': self.m_rev, 'm_rev_bound': self.m_rev_bound}
+
+        results = []
+        for ub, lb, window, m_rev_bound in product(ub_range, lb_range, window_range, m_rev_bound_range):
+            self.change_params(ub, lb, window, m_rev_bound=m_rev_bound)
+            backtest_results = self.backtest(plot=False, 
+                                        timeframe=timeframe, 
+                                        start_date=start_date,
+                                        end_date=end_date)
+            results.append((ub, lb, window, m_rev_bound, backtest_results['returns'], backtest_results['strategy']))
+
+        results = pd.DataFrame(results, columns=['ub', 'lb', 'window', 'm_rev_bound', 'hold_returns', 'strategy_returns'])
+        results['net'] = results['strategy_returns'] - results['hold_returns']
+        results = results.sort_values(by='net', ascending=False)
+
+        opt_ub = results.iloc[0]['ub']
+        opt_lb = results.iloc[0]['lb']
+        opt_window = results.iloc[0]['window']
+        opt_m_rev_bound = results.iloc[0]['m_rev_bound']
+
+        if inplace:
+            self.change_params(opt_ub, opt_lb, opt_window, m_rev_bound=opt_m_rev_bound)
+        else:
+            self.change_params(**old_params)
+
+        return results
 
 
 # TODO:

@@ -220,7 +220,7 @@ class MA_Crossover(Strategy):
         self.__get_data()
 
     def plot(self, timeframe='1d', start_date=None, end_date=None, 
-            show_signal=True, fig=None, subplot_idx=None):
+            show_signal=True):
 
         df = self.daily if timeframe == '1d' else self.five_min
 
@@ -241,7 +241,7 @@ class MA_Crossover(Strategy):
         long_param = f'{self.ptype}={self.long}'
 
         # Add short MA line
-        trace1 = go.Scatter(
+        short_MA = go.Scatter(
             x=short_data.index,
             y=short_data,
             line=dict(
@@ -254,7 +254,7 @@ class MA_Crossover(Strategy):
         )
 
         # Add long MA line
-        trace2 = go.Scatter(
+        long_MA = go.Scatter(
             x=long_data.index,
             y=long_data,
             line=dict(
@@ -267,7 +267,7 @@ class MA_Crossover(Strategy):
         )
 
         if show_signal:
-            trace3 = go.Scatter(
+            signal = go.Scatter(
                 x=signal.index,
                 y=signal,
                 line=dict(color='green', width=0.8, dash='solid'),
@@ -276,37 +276,23 @@ class MA_Crossover(Strategy):
             )
 
         # Add traces based on whether it's a subplot or not
-        standalone = False
-        if fig is None:
-            standalone = True
-            fig = go.Figure()
+        fig = go.Figure()
 
-        fig.add_trace(trace1,
-                    row=subplot_idx[0] if subplot_idx else None,
-                    col=subplot_idx[1] if subplot_idx else None)
+        fig.add_trace(short_MA)
 
-        fig.add_trace(trace2, 
-                    row=subplot_idx[0] if subplot_idx else None,
-                    col=subplot_idx[1] if subplot_idx else None)
+        fig.add_trace(long_MA)
 
         if show_signal:
-            if standalone:
-                fig.add_trace(trace3)
-            else:
-                fig.add_trace(trace3,
-                            row=subplot_idx[0] if subplot_idx else None,
-                            col=subplot_idx[1] if subplot_idx else None,
-                            secondary_y=True)
+            fig.add_trace(signal)
 
         # Update layout with secondary y-axis
         layout = {}
 
-        if standalone:
-            layout['title'] = dict(
-                    text=f'{self.asset.ticker} MA Crossover ({self.short}/{self.long})',
-                    x=0.5,
-                    y=0.95
-                )
+        layout['title'] = dict(
+                text=f'{self.asset.ticker} MA Crossover ({self.short}/{self.long})',
+                x=0.5,
+                y=0.95
+            )
 
         layout['xaxis'] = dict(
                 showgrid=True,
@@ -347,19 +333,8 @@ class MA_Crossover(Strategy):
                             plot_bgcolor='rgba(240,240,240,0.95)',
                             hovermode='x unified')
 
-        if standalone:
-            fig.show()
-        else:
-            fig.update_yaxes(
-                title_text=f'Price ({self.asset.currency})',
-                row=subplot_idx[0] if subplot_idx else None, 
-                col=subplot_idx[1] if subplot_idx else None
-            )
-            fig.update_xaxes(
-                title_text=f'{self.asset.ticker} MA Crossover ({self.short}/{self.long})', 
-                row=subplot_idx[0] if subplot_idx else None, 
-                col=subplot_idx[1] if subplot_idx else None
-            )
+
+        fig.show()
 
         return fig
 

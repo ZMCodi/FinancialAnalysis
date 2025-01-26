@@ -416,20 +416,20 @@ class MA_Crossover(Strategy):
 
 class RSI(Strategy):
 
-    def __init__(self, asset, ub=70, lb=30, window=14, switch='re', m_rev=True, m_rev_bound=50):
+    def __init__(self, asset, ub=70, lb=30, window=14, exit='re', m_rev=True, m_rev_bound=50):
 
         super().__init__(asset)
         self.__ub = ub
         self.__lb = lb
         self.window = window
-        self.switch = switch
+        self.exit = exit
         self.m_rev = m_rev
         self.__m_rev_bound = m_rev_bound
         self.engine = TAEngine()
         self.__get_data()
 
     def __str__(self):
-        return f'RSI({self.asset.ticker}, ub={self.ub}, lb={self.lb}, window={self.window}, switch={self.switch}, m_rev={self.m_rev}, m_rev_bound={self.m_rev_bound})'
+        return f'RSI({self.asset.ticker}, ub={self.ub}, lb={self.lb}, window={self.window}, exit={self.exit}, m_rev={self.m_rev}, m_rev_bound={self.m_rev_bound})'
 
     def __get_data(self):
         self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
@@ -441,14 +441,11 @@ class RSI(Strategy):
         for i, df in enumerate([self.daily, self.five_min]):
             data = df['adj_close']
             name = 'daily' if i == 0 else 'five_min'
-            # delta = df['adj_close'].diff()
-            # gain = (delta.where(delta > 0, 0)).ewm(alpha=1/self.window, min_periods=self.window).mean()
-            # loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/self.window, min_periods=self.window).mean()
-            # rs = gain / loss
+
             df['rsi'] = self.engine.calculate_rsi(data, self.window, name)
             df.dropna(inplace=True)
 
-            if self.switch == 're':
+            if self.exit == 're':
                 df['signal'] = np.where(
                     np.logical_and(df['rsi'].shift(1) > self.ub, df['rsi'] < self.ub), -1,
                     np.where(np.logical_and(df['rsi'].shift(1) < self.lb, df['rsi'] > self.lb), 1, np.nan)
@@ -465,7 +462,7 @@ class RSI(Strategy):
             df['signal'] = df['signal'].ffill().astype(int)
 
             if self.m_rev:
-                if self.switch == 're':
+                if self.exit == 're':
                     short_entries = np.logical_and(df['rsi'].shift(1) > self.ub, df['rsi'] < self.ub)
                 else:
                     short_entries = np.logical_and(df['rsi'].shift(1) <= self.ub, df['rsi'] > self.ub)
@@ -510,11 +507,11 @@ class RSI(Strategy):
         self.__m_rev_bound = value
         self.__get_data()
 
-    def change_params(self, ub, lb, window=None, switch=None, m_rev=None, m_rev_bound=None):
+    def change_params(self, ub, lb, window=None, exit=None, m_rev=None, m_rev_bound=None):
         self.ub = ub
         self.lb = lb
         self.window = window if window is not None else self.window
-        self.switch = switch if switch is not None else self.switch
+        self.exit = exit if exit is not None else self.exit
         self.m_rev = m_rev if m_rev is not None else self.m_rev
         self.m_rev_bound = m_rev_bound if m_rev_bound is not None else self.m_rev_bound
         self.__get_data()
@@ -662,14 +659,21 @@ class RSI(Strategy):
             lb_range = np.arange(20, 41, 5)
         if window_range is None:
             window_range = np.arange(10, 31, 5)
-        if m_rev_bound_range is None:
-            m_rev_bound_range = np.arange(40, 61, 5)
+
+        params = [ub_range, lb_range, window_range]
+
+        if self.m_rev:
+            if m_rev_bound_range is None:
+                m_rev_bound_range = np.arange(40, 61, 5)
+            params.append(m_rev_bound_range)
+        else:
+            params.append([self.m_rev_bound])
 
         old_params = {'ub': self.ub, 'lb': self.lb, 'window': self.window,
-                    'switch': self.switch, 'm_rev': self.m_rev, 'm_rev_bound': self.m_rev_bound}
+                    'exit': self.exit, 'm_rev': self.m_rev, 'm_rev_bound': self.m_rev_bound}
 
         results = []
-        for ub, lb, window, m_rev_bound in product(ub_range, lb_range, window_range, m_rev_bound_range):
+        for ub, lb, window, m_rev_bound in product(*params):
             self.change_params(ub, lb, window, m_rev_bound=m_rev_bound)
             backtest_results = self.backtest(plot=False, 
                                         timeframe=timeframe, 
@@ -696,7 +700,7 @@ class RSI(Strategy):
 
 # TODO:
 # parrallelize backtest and optimize methods
-# add RSI and MACD strategies
+# add MACD and BB strategies
 # add transaction costs
 # add risk management
 # add algo to reduce number of trades (e.g. minimum holding period, dead zone, trend filter)

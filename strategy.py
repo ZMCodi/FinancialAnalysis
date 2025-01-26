@@ -16,9 +16,11 @@ class TAEngine:
             return self.cache[key]
 
         if ewm:
-            return data.ewm(**{'param_type': param}).mean()
+            self.cache[key] = data.ewm(**{'param_type': param}).mean()
         else:
-            return data.rolling(window=param).mean()
+            self.cache[key] = data.rolling(window=param).mean()
+
+        return self.cache[key]
 
 class Strategy(ABC):
 
@@ -190,18 +192,22 @@ class MA_Crossover(Strategy):
         self.p1 = self.short
         self.p2 = self.long
 
-        for i, timeframe in enumerate([self.daily, self.five_min]):
-            df = timeframe
-            if self.ewm:
-                param = {}
-                key = self.ptype if self.ptype != 'window' else 'span'
-                param[key] = self.short
-                df['short'] = df['adj_close'].ewm(**param).mean()
-                param[key] = self.long
-                df['long'] = df['adj_close'].ewm(**param).mean()
-            else:
-                df['short'] = df['adj_close'].rolling(window=self.short).mean()
-                df['long'] = df['adj_close'].rolling(window=self.long).mean()
+        for i, df in enumerate([self.daily, self.five_min]):
+            data = df['adj_close']
+            # if self.ewm:
+            #     param = {}
+            #     key = self.ptype if self.ptype != 'window' else 'span'
+            #     param[key] = self.short
+            #     df['short'] = df['adj_close'].ewm(**param).mean()
+            #     param[key] = self.long
+            #     df['long'] = df['adj_close'].ewm(**param).mean()
+            # else:
+            #     df['short'] = df['adj_close'].rolling(window=self.short).mean()
+            #     df['long'] = df['adj_close'].rolling(window=self.long).mean()
+            ptype = 'span' if self.ptype == 'window' and self.ewm else self.ptype
+            df['short'] = self.engine.calculate_ma(data, self.ewm, ptype, self.short)
+            df['long'] = self.engine.calculate_ma(data, self.ewm, ptype, self.long)
+
             df['signal'] = np.where(df['short'] > df['long'], 1, -1)
             df.rename(columns=dict(log_rets='returns'), inplace=True)
             df['strategy'] = df['returns'] * df['signal']

@@ -5,6 +5,21 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 
+class TAEngine:
+
+    def __init__(self):
+        self.cache = {}
+
+    def calculate_ma(self, data, ewm, param_type, param):
+        key = f'ma_{param_type}={param}'
+        if key in self.cache:
+            return self.cache[key]
+
+        if ewm:
+            return data.ewm(**{'param_type': param}).mean()
+        else:
+            return data.rolling(window=param).mean()
+
 class Strategy(ABC):
 
     def __init__(self, asset):
@@ -163,6 +178,7 @@ class MA_Crossover(Strategy):
         self.ewm = ewm
         self.__short = eval(f'short_{param_type}')
         self.__long = eval(f'long_{param_type}')
+        self.engine = TAEngine()
         self.__get_data()
 
     def __str__(self):
@@ -444,7 +460,7 @@ class RSI(Strategy):
                 mean_rev_points = np.logical_and(df['rsi'] <= self.m_rev_bound, df['signal'] == -1)
                 groups = short_entries.cumsum()
                 mean_rev_triggered = mean_rev_points.groupby(groups).cummax()
-                df['signal'] = np.where(mean_rev_triggered, 1, df['signal'])                    
+                df['signal'] = np.where(mean_rev_triggered, 1, df['signal'])
 
             df.rename(columns=dict(log_rets='returns'), inplace=True)
             df['strategy'] = df['returns'] * df['signal']

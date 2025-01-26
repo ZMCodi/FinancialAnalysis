@@ -1,44 +1,66 @@
+''' Asset module which makes data querying, analysis and plotting simple
+Just pass in a ticker from yfinance and analyze the asset in just a few lines of code
+- statistical analysis
+- resample
+- price history plot
+- candlestick with volume plot
+- MA plot
+- returns distribution plot
+'''
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import psycopg as pg
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import seaborn as sns
 import plotly.express as px
-from datetime import datetime
+from datetime import datetime, date
 import kaleido
 import mplfinance as mpf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy import stats
 from config import DB_CONFIG
+from typing import Self, Optional
+
+DateLike = str | datetime | date | pd.Timestamp
 
 class Asset():
+    ''' Asset class handles all the data processing and plotting functions
+    - Queries data from the database
+    - if not available, download from yfinance and add to db to set up future tracking
+    - prepares data for analysis and plotting
+    '''
 
-    def __init__(self, ticker):
-        
+    def __init__(self, ticker: str) -> None:
+        '''pass in the ticker string from yfinance'''
         self.ticker = ticker
         self.__get_data()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f'Asset({self.ticker!r})'
     
-    def __eq__(self, other):
+    def __eq__(self, other: Self) -> bool:
         return self.ticker == other.ticker
     
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.ticker)
 
-    def __get_data(self):
+    def __get_data(self) -> None:
+        # query db and check if ticker exists
         with pg.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT date, open, high, low, close, adj_close, volume FROM daily WHERE ticker = %s", (self.ticker,))
+                # if not, add new ticker and requery
                 if cur.rowcount == 0:
                     self.__insert_new_ticker()
                     cur.execute("SELECT date, open, high, low, close, adj_close, volume FROM daily WHERE ticker = %s", (self.ticker,))
 
                 data = cur.fetchall()
 
+                # reindex data and calculate returns and log returns
                 self.daily = pd.DataFrame(data, columns=['date', 'open', 'high', 'low', 'close', 'adj_close', 'volume']).set_index('date')
                 self.daily = self.daily.astype(float)
                 self.daily.index = pd.to_datetime(self.daily.index)
@@ -46,6 +68,7 @@ class Asset():
                 self.daily['log_rets'] = np.log(self.daily['adj_close'] / self.daily['adj_close'].shift(1))
                 self.daily['rets'] = self.daily['adj_close'].pct_change()
 
+                # same for five minute data
                 cur.execute("SELECT date, open, high, low, close, adj_close, volume FROM five_minute WHERE ticker = %s", (self.ticker,))
                 self.five_minute = pd.DataFrame(cur.fetchall(), columns=['date', 'open', 'high', 'low', 'close', 'adj_close', 'volume']).set_index('date')
                 self.five_minute = self.five_minute.astype(float)
@@ -54,13 +77,14 @@ class Asset():
                 self.five_minute['log_rets'] = np.log(self.five_minute['adj_close'] / self.five_minute['adj_close'].shift(1))
                 self.five_minute['rets'] = self.five_minute['adj_close'].pct_change()
 
+                # get metadata like asset type and currency
                 cur.execute("SELECT asset_type FROM tickers WHERE ticker = %s", (self.ticker,))
                 self.asset_type = cur.fetchone()[0]
 
                 cur.execute("SELECT currency FROM tickers WHERE ticker = %s", (self.ticker,))
                 self.currency = cur.fetchone()[0]
     
-    def __insert_new_ticker(self):
+    def __insert_new_ticker(self) -> None:
         print(f"{self.ticker} is not yet available in database. Downloading from yfinance...")
 
         # Ticker table data
@@ -71,22 +95,22 @@ class Asset():
             print(f'{self.ticker} is an invalid yfinance ticker')
             return
 
+        # transform metadata for insertion to database
         comp_name = ticker.info['shortName'].replace("'", "''")
         exchange = ticker.info['exchange']
         currency = ticker.info['currency'].upper()
         start_date = pd.to_datetime('today').date()
         asset_type = ticker.info['quoteType'].lower()
 
-        # Mapping dictionary
+        # map exchanges according to pandas market calendar
         exchange_mapping = {
             'NYQ': 'NYSE',
             'NMS': 'NASDAQ',
             'NGM': 'NASDAQ'
         }
-
-        # Mapped list
         exchange = exchange_mapping.get(exchange, exchange)
 
+        # special handling for optional metadata
         try:
             market_cap = ticker.info['marketCap']
         except KeyError:
@@ -98,18 +122,18 @@ class Asset():
             sector = None
 
         print(f'Inserting to DB {ticker=}, {comp_name=}, {exchange=}, {currency=}, {asset_type=}, {market_cap=}, {sector=}')
-            
-        # Get daily data from 2020
+
+        # Get daily data from 2020, clean and transform
         daily_data = yf.download(self.ticker, start='2020-01-01')
         daily_data = daily_data.droplevel(1, axis=1)
         daily_data['ticker'] = self.ticker
         clean_daily = self.__clean_data(daily_data)
         clean_daily = clean_daily.rename(columns={'Date': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
+        # adj_close column might not be available, especially for crypto
         if 'Adj Close' not in clean_daily.columns:
             clean_daily['adj_close'] = clean_daily['close']
         else:
             clean_daily = clean_daily.rename(columns={'Adj Close': 'adj_close'})
-        # print(f'{clean_daily.count()=}')
 
         # Get 5min data
         five_min_data = yf.download(self.ticker, interval='5m')
@@ -121,7 +145,6 @@ class Asset():
             clean_five_min['adj_close'] = clean_five_min['close']
         else:
             clean_five_min = clean_five_min.rename(columns={'Adj Close': 'adj_close'})
-        # print(f'{clean_five_min.count()=}')
 
         # Insert to database
         with pg.connect(**DB_CONFIG) as conn:
@@ -129,12 +152,14 @@ class Asset():
                 cur.execute('SELECT DISTINCT LEFT(currency_pair, 3) FROM daily_forex;')
                 currencies = [cur[0] for cur in cur.fetchall()]
 
-                # Add if new currency
+                # if asset's currency is not in db, add all possible pairs
                 if currency not in currencies:
                     self.__add_new_currency(cur, conn, currencies, currency)
 
+                # insert metadata into db
                 cur.execute("INSERT INTO tickers (ticker, comp_name, exchange, sector, market_cap, start_date, currency, asset_type) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", (self.ticker, comp_name, exchange, sector, market_cap, start_date, currency, asset_type))
 
+                # batch insertion for price data
                 BATCH_SIZE = 1000
                 batch_count = 0
                 rows_inserted = 0
@@ -148,11 +173,11 @@ class Asset():
                     if batch_count >= BATCH_SIZE:
                         conn.commit()
                         batch_count = 0
-                
+
                 if batch_count > 0:
                     conn.commit()
                     batch_count = 0
-                
+
                 print(f'daily_{rows_inserted=}')
                 rows_inserted = 0
 
@@ -165,15 +190,16 @@ class Asset():
                     if batch_count >= BATCH_SIZE:
                         conn.commit()
                         batch_count = 0
-                
+
                 if batch_count > 0:
                     conn.commit()
                     batch_count = 0
-                
+
                 print(f'five_min_{rows_inserted=}')
 
 
-    def __clean_data(self, df):
+    def __clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        # ensure appropriate high and low values
         mask = (df['High'] < df['Open']) | (df['High'] < df['Close']) | (df['Low'] > df['Open']) | (df['Low'] > df['Close'])
         clean = df[~mask].copy()
         temp = df[mask].copy()
@@ -184,11 +210,10 @@ class Asset():
         clean = clean.reset_index()
 
         return clean
-        
-    def __add_new_currency(self, cur, conn, currencies, currency):
 
+    def __add_new_currency(self, cur: pg.cursor, conn: pg.connection, currencies: list, currency: str) -> None:
+        # create all possible pairs and format according to yfinance
         new_forex = []
-        forex_ticker = []
         for curr in currencies:
             new_forex.append(f'{curr}{currency}=X')
             new_forex.append(f'{currency}{curr}=X')
@@ -198,14 +223,16 @@ class Asset():
         for pair in new_forex:
             data = yf.download(pair, start='2020-01-01')
             data = data.droplevel(1, axis=1)
-            data['currency_pair'] = f'{pair[:3]}/{pair[3:6]}'
+            data['currency_pair'] = f'{pair[:3]}/{pair[3:6]}'  # reformat according to db
             df_list.append(data)
 
+        # combine, clean and transform data
         df = pd.concat(df_list)
         clean = self.clean_data(df)
         clean.drop(columns=['Adj Close', 'Volume'], inplace=True)
         clean = clean.rename(columns={'Date': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close'})
 
+        # batch insertion
         BATCH_SIZE = 1000
         batch_count = 0
         for _, row in clean.iterrows():
@@ -219,35 +246,65 @@ class Asset():
         if batch_count > 0:
             conn.commit()
 
-    def plot_price_history(self, *, timeframe='1d', start_date=None, end_date=None, resample=None, 
-                           interactive=True, line=None, filename=None, fig=None, subplot_idx=None):
-        
+    def plot_price_history(self, *, timeframe: str = '1d', start_date: Optional[DateLike] = None,
+                        end_date: Optional[DateLike] = None, resample: Optional[str] = None, 
+                        interactive: bool = True, line: Optional[int | float] = None, filename: Optional[str] = None, 
+                        fig: Optional[go.Figure | Figure] = None, subplot_idx: Optional[int | tuple[int, int]] = None) -> go.Figure | Figure:
+        """Plots the price history of the underlying asset.
+
+        Args:
+            timeframe (str, optional): Determines which dataframe to use ('1d' for daily or '5m' for five minute data). 
+                Defaults to '1d'.
+            start_date (DateLike, optional): Start date for plotting range. Defaults to None.
+            end_date (DateLike, optional): End date for plotting range. Defaults to None.
+            resample (str, optional): Resampling frequency in pandas format (e.g., '1H' for hourly).
+                Used primarily with 5-min data to remove flat regions during market close. Defaults to None.
+            interactive (bool, optional): Whether to create an interactive Plotly graph (True) 
+                or static Matplotlib graph (False). Defaults to True.
+            line (float | int, optional): Y-value for horizontal threshold line. Defaults to None.
+            filename (str, optional): Path to save the figure. Defaults to None.
+            fig (plotly.graph_objects.Figure | matplotlib.figure.Figure, optional): Existing figure to plot on.
+                Used for overlaying plots or creating subplots. Defaults to None.
+            subplot_idx (int | tuple[int, int], optional): Subplot position specifier.
+                For Matplotlib: integer index.
+                For Plotly: (row, col) tuple. Defaults to None.
+
+        Returns:
+            (plotly.graph_objects.Figure | matplotlib.figure.Figure): Price history of underlying asset.
+                Returns Plotly figure if interactive=True, Matplotlib figure otherwise.
+        """
+
+        # choose data based on specified timeframe
         data = self.daily['close'] if timeframe == '1d' else self.five_minute['close']
 
+        # slice data according to specified start and end dates
         if start_date is not None:
             data = data[data.index >= start_date]
         if end_date is not None:
             data = data[data.index <= end_date]
+
         if resample is not None:
             data = data.resample(resample).last()
 
         data = data.dropna()
-        
+
+        # static plot
         if not interactive:
             # Set the style and figure size
-            plt.style.use('seaborn-v0_8')  # Clean, modern look
+            plt.style.use('seaborn-v0_8')
 
+            # create figure if not passed or get axes from figure
             if fig is None:
-                fig, ax = plt.subplots(figsize=(12, 6))  # Wider aspect ratio
+                fig, ax = plt.subplots(figsize=(12, 6))
             else:
                 ax = fig.axes[subplot_idx] if subplot_idx is not None else fig.gca()
 
             # Create the plot with customizations
             sns.lineplot(data=data.to_frame(), x=data.index, y=data, ax=ax,
-                        color='#1f77b4',  # Professional blue color
-                        linewidth=2)      # Slightly thicker line
+                        color='#1f77b4',
+                        linewidth=2)
 
-            # Customize the title and labels with better typography
+            # Customize the title and labels
             ax.set_title(f'{self.ticker} Price History', 
                         fontsize=16, 
                         pad=20,
@@ -272,25 +329,26 @@ class Asset():
             ax.tick_params(labelsize=10)
             plt.xticks(rotation=0)
 
-            # plt.tight_layout()
-
             ax.set_facecolor('#f8f9fa')
             fig.patch.set_facecolor('white')
 
+            # add line at specified height
             if line is not None:
                 ax.axhline(line, color='r', linestyle='--')
 
             if filename is not None:
                 fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
+
+        # interactive plot
         else:
 
+            # keeps track of whether plot is a subplot or standalone
             standalone = False
-            
             if fig is None:
                 fig = go.Figure()
                 standalone = True
-                
-            # Add trace to the figure
+
+            # Add price trace
             fig.add_trace(
                 go.Scatter(
                     x=data.index,
@@ -302,7 +360,14 @@ class Asset():
                 col=subplot_idx[1] if subplot_idx else None
             )
 
-            # Only update layout if it's a standalone plot
+            # add line
+            if line is not None:
+                fig.add_hline(y=line,
+                    line_dash="dash",
+                    line_color="red",
+                )
+
+            # Only add title and show plot if standalone
             if standalone:
                 fig.update_layout(
                     title=f'{self.ticker} Price History',
@@ -310,12 +375,9 @@ class Asset():
                     yaxis_title=f'Price ({self.currency})'
                 )
 
-                if line is not None:
-                    fig.add_hline(y=line,
-                        line_dash="dash",
-                        line_color="red",
-                    )
                 fig.show()
+
+            # if subplots, only update the axes
             else:
                 fig.update_yaxes(
                     title_text=f'Price ({self.currency})', 
@@ -334,8 +396,8 @@ class Asset():
         return fig
 
 
-    def plot_candlestick(self, *, start_date=None, end_date=None, timeframe='1d', 
-                         interactive=True, volume=True, resample=None,
+    def plot_candlestick(self, *, start_date: Optional[DateLike] = None, end_date: Optional[DateLike] = None, 
+                         timeframe: str = '1d', interactive: bool = True, volume: bool = True, resample=None,
                          filename=None, fig=None, candle_idx=None, vol_idx=None):
 
         if resample is not None:

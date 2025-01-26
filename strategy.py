@@ -10,15 +10,28 @@ class TAEngine:
     def __init__(self):
         self.cache = {}
 
-    def calculate_ma(self, data, ewm, param_type, param):
-        key = f'ma_{param_type}={param}'
+    def calculate_ma(self, data, ewm, param_type, param, name):
+        key = f'ma_{param_type}={param}, {name=}'
         if key in self.cache:
             return self.cache[key]
 
         if ewm:
-            self.cache[key] = data.ewm(**{'param_type': param}).mean()
+            self.cache[key] = data.ewm(**{f'{param_type}': param}).mean()
         else:
             self.cache[key] = data.rolling(window=param).mean()
+
+        return self.cache[key]
+
+    def calculate_rsi(self, data, window, name):
+        key = f'rsi_window={window}, {name=}'
+        if key in self.cache:
+            return self.cache[key]
+
+        delta = data.diff()
+        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/window, min_periods=window).mean()
+        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/window, min_periods=window).mean()
+        rs = gain / loss
+        self.cache[key] = 100 - (100 / (1 + rs))
 
         return self.cache[key]
 
@@ -194,19 +207,11 @@ class MA_Crossover(Strategy):
 
         for i, df in enumerate([self.daily, self.five_min]):
             data = df['adj_close']
-            # if self.ewm:
-            #     param = {}
-            #     key = self.ptype if self.ptype != 'window' else 'span'
-            #     param[key] = self.short
-            #     df['short'] = df['adj_close'].ewm(**param).mean()
-            #     param[key] = self.long
-            #     df['long'] = df['adj_close'].ewm(**param).mean()
-            # else:
-            #     df['short'] = df['adj_close'].rolling(window=self.short).mean()
-            #     df['long'] = df['adj_close'].rolling(window=self.long).mean()
+            name = 'daily' if i == 0 else 'five_min'
             ptype = 'span' if self.ptype == 'window' and self.ewm else self.ptype
-            df['short'] = self.engine.calculate_ma(data, self.ewm, ptype, self.short)
-            df['long'] = self.engine.calculate_ma(data, self.ewm, ptype, self.long)
+
+            df['short'] = self.engine.calculate_ma(data, self.ewm, ptype, self.short, name)
+            df['long'] = self.engine.calculate_ma(data, self.ewm, ptype, self.long, name)
 
             df['signal'] = np.where(df['short'] > df['long'], 1, -1)
             df.rename(columns=dict(log_rets='returns'), inplace=True)
@@ -420,6 +425,7 @@ class RSI(Strategy):
         self.switch = switch
         self.m_rev = m_rev
         self.__m_rev_bound = m_rev_bound
+        self.engine = TAEngine()
         self.__get_data()
 
     def __str__(self):
@@ -432,13 +438,14 @@ class RSI(Strategy):
         self.p1 = self.ub
         self.p2 = self.lb
 
-        for i, timeframe in enumerate([self.daily, self.five_min]):
-            df = timeframe
-            delta = df['adj_close'].diff()
-            gain = (delta.where(delta > 0, 0)).ewm(alpha=1/self.window, min_periods=self.window).mean()
-            loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/self.window, min_periods=self.window).mean()
-            rs = gain / loss
-            df['rsi'] = 100 - (100 / (1 + rs))
+        for i, df in enumerate([self.daily, self.five_min]):
+            data = df['adj_close']
+            name = 'daily' if i == 0 else 'five_min'
+            # delta = df['adj_close'].diff()
+            # gain = (delta.where(delta > 0, 0)).ewm(alpha=1/self.window, min_periods=self.window).mean()
+            # loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/self.window, min_periods=self.window).mean()
+            # rs = gain / loss
+            df['rsi'] = self.engine.calculate_rsi(data, self.window, name)
             df.dropna(inplace=True)
 
             if self.switch == 're':

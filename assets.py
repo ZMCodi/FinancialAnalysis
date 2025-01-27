@@ -1274,7 +1274,7 @@ class Asset():
 
     def _add_bollinger_bands(self, df: DataFrame, num_std: float = 2.) -> DataFrame:
         """Helper method to calculate bollinger bands
-        
+
         Args:
             df (pandas.core.frame.DataFrame): df to add bollinger bands onto
             num_std (float): Number of standard deviations away for bollinger bands
@@ -1288,8 +1288,6 @@ class Asset():
         return df
 
 # TODO:
-# backtest SMA strategy
-# optimize SMA window
 # plot more diagrams
-# add more technical indicators (RSI, MACD, ATR)
 # simple default dashboard
+# currency conversion

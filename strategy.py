@@ -53,6 +53,14 @@ class TAEngine:
 
         return self.cache[key]
 
+
+class SignalGenerator:
+    def __init__(self):
+        self.cache = {}
+
+    def ma_crossover(self, short, long):
+        return np.where(short > long, 1, -1)
+
 class Strategy(ABC):
 
     def __init__(self, asset):
@@ -212,6 +220,7 @@ class MA_Crossover(Strategy):
         self.__short = eval(f'short_{param_type}')
         self.__long = eval(f'long_{param_type}')
         self.engine = TAEngine()
+        self.signal_gen = SignalGenerator()
         self.__get_data()
 
     def __str__(self):
@@ -231,7 +240,7 @@ class MA_Crossover(Strategy):
             df['long'] = self.engine.calculate_ma(data, self.ewm, ptype, self.long, name)
             df.dropna(inplace=True)
 
-            df['signal'] = np.where(df['short'] > df['long'], 1, -1)
+            df['signal'] = self.signal_gen.ma_crossover(df['short'], df['long'])
             df.rename(columns=dict(log_rets='returns'), inplace=True)
             df['strategy'] = df['returns'] * df['signal']
             if i == 0:

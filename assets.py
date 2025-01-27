@@ -10,6 +10,7 @@ Just pass in a ticker from yfinance and analyze the asset in just a few lines of
 
 import yfinance as yf
 import pandas as pd
+from pandas.core.frame import DataFrame
 import numpy as np
 import psycopg as pg
 import matplotlib.pyplot as plt
@@ -35,7 +36,11 @@ class Asset():
     '''
 
     def __init__(self, ticker: str) -> None:
-        '''pass in the ticker string from yfinance'''
+        '''Instantiates the asset class and gets data from the database
+
+        Args:
+            ticker (str): ticker string from yfinance
+        '''
         self.ticker = ticker
         self.__get_data()
 
@@ -49,6 +54,13 @@ class Asset():
         return hash(self.ticker)
 
     def __get_data(self) -> None:
+        """Gets data from the database and calculate additional columns
+
+        - Tries to query db for ticker data
+        - If not available, add new data
+        - Calculate returns and log returns
+        - Store ticker metadata
+        """
         # query db and check if ticker exists
         with pg.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
@@ -85,6 +97,13 @@ class Asset():
                 self.currency = cur.fetchone()[0]
     
     def __insert_new_ticker(self) -> None:
+        """Downloads and inserts new ticker to database
+        
+        - Downloads ticker from yfinance
+        - Get ticker metadata and insert into tickers table
+        - Clean and transform daily and 5min data
+        - Batch insert into database
+        """
         print(f"{self.ticker} is not yet available in database. Downloading from yfinance...")
 
         # Ticker table data
@@ -198,7 +217,15 @@ class Asset():
                 print(f'five_min_{rows_inserted=}')
 
 
-    def __clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
+    def __clean_data(self, df: DataFrame) -> DataFrame:
+        """Cleans OHLC data to ensure data passes db table price checks
+
+        Args:
+            df (pandas.core.frame.DataFrame): df to be cleaned
+
+        Returns:
+            pandas.core.frame.DataFrame: cleaned df
+        """
         # ensure appropriate high and low values
         mask = (df['High'] < df['Open']) | (df['High'] < df['Close']) | (df['Low'] > df['Open']) | (df['Low'] > df['Close'])
         clean = df[~mask].copy()
@@ -211,7 +238,15 @@ class Asset():
 
         return clean
 
-    def __add_new_currency(self, cur: pg.cursor, conn: pg.connection, currencies: list, currency: str) -> None:
+    def __add_new_currency(self, cur: pg.Cursor, conn: pg.Connection, currencies: list, currency: str) -> None:
+        """Adds new currency to database to be tracked
+
+        Args:
+            cur (psycopg.Cursor): connection cursor to execute data insertion
+            conn (psycopg.Connection): Database connection
+            currencies (list): List of currencies in database
+            currency (str): New currency to be added
+        """
         # create all possible pairs and format according to yfinance
         new_forex = []
         for curr in currencies:
@@ -257,7 +292,7 @@ class Asset():
                 Defaults to '1d'.
             start_date (DateLike, optional): Start date for plotting range. Defaults to None.
             end_date (DateLike, optional): End date for plotting range. Defaults to None.
-            resample (str, optional): Resampling frequency in pandas format (e.g., '1H' for hourly).
+            resample (str, optional): Resampling frequency in pandas format (e.g., 'B' for business day).
                 Used primarily with 5-min data to remove flat regions during market close. Defaults to None.
             interactive (bool, optional): Whether to create an interactive Plotly graph (True) 
                 or static Matplotlib graph (False). Defaults to True.
@@ -294,10 +329,12 @@ class Asset():
             plt.style.use('seaborn-v0_8')
 
             # create figure if not passed or get axes from figure
+            standalone = True
             if fig is None:
                 fig, ax = plt.subplots(figsize=(12, 6))
             else:
                 ax = fig.axes[subplot_idx] if subplot_idx is not None else fig.gca()
+                standalone = False
 
             # Create the plot with customizations
             sns.lineplot(data=data.to_frame(), x=data.index, y=data, ax=ax,
@@ -338,6 +375,9 @@ class Asset():
 
             if filename is not None:
                 fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
+
+            if standalone:
+                plt.show()
 
         # interactive plot
         else:
@@ -396,9 +436,35 @@ class Asset():
         return fig
 
 
-    def plot_candlestick(self, *, start_date: Optional[DateLike] = None, end_date: Optional[DateLike] = None, 
-                         timeframe: str = '1d', interactive: bool = True, volume: bool = True, resample=None,
-                         filename=None, fig=None, candle_idx=None, vol_idx=None):
+    def plot_candlestick(self, *, timeframe: str = '1d', start_date: Optional[DateLike] = None, end_date: Optional[DateLike] = None, 
+                         resample: Optional[str] = None, interactive: bool = True, volume: bool = True,
+                         filename: Optional[str] = None, fig: Optional[go.Figure | Figure] = None, 
+                         candle_idx: Optional[int | tuple[int, int]] = None, vol_idx: Optional[int | tuple[int, int]] = None) -> go.Figure | Figure:
+        """Plots the candlestick chart of the underlying asset.
+
+        Args:
+            timeframe (str, optional): Determines which dataframe to use ('1d' for daily or '5m' for five minute data). 
+                Defaults to '1d'.
+            start_date (DateLike, optional): Start date for plotting range. Defaults to None.
+            end_date (DateLike, optional): End date for plotting range. Defaults to None.
+            resample (str, optional): Resampling frequency in pandas format (e.g., 'B' for business day).
+            interactive (bool, optional): Whether to create an interactive Plotly graph (True) 
+                or static Matplotlib graph (False). Defaults to True.
+            volume (bool): Whether to plot volume bars or not. Defaults to True
+            filename (str, optional): Path to save the figure. Defaults to None.
+            fig (plotly.graph_objects.Figure | matplotlib.figure.Figure, optional): Existing figure to plot on.
+                Used for overlaying plots or creating subplots. Defaults to None.
+            candle_idx (int | tuple[int, int], optional): Candlestick subplot position specifier.
+                For Matplotlib: integer index.
+                For Plotly: (row, col) tuple. Defaults to None.
+            vol_idx (int | tuple[int, int], optional): Volume bars subplot position specifier.
+                For Matplotlib: integer index.
+                For Plotly: (row, col) tuple. Defaults to None.
+
+        Returns:
+            (plotly.graph_objects.Figure | matplotlib.figure.Figure): Candlestick chart of underlying asset.
+                Returns Plotly figure if interactive=True, Matplotlib figure otherwise.
+        """
 
         if resample is not None:
             data = self.resample(period=resample, five_min=True if timeframe != '1d' else False)
@@ -407,25 +473,29 @@ class Asset():
 
         if end_date is not None:
             data = data[data.index <= end_date]
-        
         if start_date is not None:
             data = data[data.index >= start_date]
+
+        # default time window for static plot to ensure plot is readable
         else:
-            if timeframe == '1d':
-                days_back = 365
-            else:
-                if self.asset_type == 'cryptocurrency':
-                    days_back = 1
+            if not interactive:
+                if timeframe == '1d':
+                    days_back = 365
                 else:
-                    days_back = 3
-            data = data[data.index >= data.index[-1] - pd.Timedelta(days=days_back)]
+                    if self.asset_type == 'cryptocurrency':
+                        days_back = 1
+                    else:
+                        days_back = 3
+                data = data[data.index >= data.index[-1] - pd.Timedelta(days=days_back)]
 
         data = data.dropna()
 
+        # static plot
         if not interactive:
-            # Create figure with white background
-            plt.style.use('seaborn-v0_8')  # Reset to light style
 
+            plt.style.use('seaborn-v0_8')
+
+            # create figure and axes or use existing if passed
             if fig is None:
                 standalone = True
                 if volume:
@@ -443,15 +513,18 @@ class Asset():
             fig.patch.set_facecolor('white')
             ax1.set_facecolor('white')
 
+            # define colors and styles
             mc = mpf.make_marketcolors(up='#26A69A',
                                     down='#EF5350', 
                                     edge='inherit',
                                     volume='inherit')
+
             s = mpf.make_mpf_style(marketcolors=mc,
                                 gridstyle=':',
                                 gridcolor='#E0E0E0',
                                 y_on_right=False)
 
+            # create candlestick plot
             mpf.plot(data,
                     type='candle',
                     style=s,
@@ -460,13 +533,13 @@ class Asset():
 
             ax1.grid(True, linestyle=':', color='#E0E0E0', alpha=0.6)
 
-            # Add professional title with custom font
+            # Add title
             ax1.set_title(f"{self.ticker} Candlestick Chart{' with Volume Bars' if volume else ''}", 
                         pad=20, 
                         fontsize=14, 
                         fontweight='bold',
                         fontfamily='sans-serif')
-            
+
             # Refine x-axis formatting
             n_labels = 6 if standalone else 3
             step = len(data) // n_labels
@@ -488,11 +561,13 @@ class Asset():
 
             ax1.yaxis.set_major_formatter(plt.FuncFormatter(format_prices))
 
+            # add volume bars
             if volume:
                 if standalone:
                     ax1.set_xticklabels([])
                 ax2.set_facecolor('white')
 
+                # format colors according to candlestick
                 colors = ['#26A69A' if close >= open else '#EF5350'
                         for open, close in zip(data['open'], data['close'])]
 
@@ -534,12 +609,16 @@ class Asset():
                 ax1.set_xticks(range(0, len(data), step))
                 ax1.set_xticklabels(data.index[::step].strftime('%Y-%m-%d'), rotation=0)
 
-            # plt.tight_layout()
-
             if filename is not None:
                 fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
 
+            if standalone:
+                plt.show()
+
+        # interactive plot
         else:
+
+            # create or use existing figure
             standalone = False
             if fig is None:
                 standalone = True
@@ -551,7 +630,6 @@ class Asset():
                 else:
                     fig = go.Figure()
 
-            # Add candlestick
             if standalone:
                 candlestick_row = 1
                 candlestick_col = 1
@@ -559,44 +637,25 @@ class Asset():
                 candlestick_row = candle_idx[0] if candle_idx is not None else 1
                 candlestick_col = candle_idx[1] if candle_idx is not None else 1
 
-            if volume:  # volume and standalone or subplot
+            # Create candlestick trace
+            candlestick = go.Candlestick(
+                x=data.index,
+                open=data['open'],
+                high=data['high'],
+                low=data['low'],
+                close=data['close'],
+                name='OHLC'
+            )
+
+            # Add trace with appropriate positioning
+            if not standalone:  # subplot case (with or without volume)
                 fig.add_trace(
-                    go.Candlestick(
-                        x=data.index,
-                        open=data['open'],
-                        high=data['high'],
-                        low=data['low'],
-                        close=data['close'],
-                        name='OHLC'
-                    ),
+                    candlestick,
                     row=candlestick_row,
                     col=candlestick_col
                 )
-            else:
-                if standalone:  # no volume and standalone
-                    fig.add_trace(
-                        go.Candlestick(
-                            x=data.index,
-                            open=data['open'],
-                            high=data['high'],
-                            low=data['low'],
-                            close=data['close'],
-                            name='OHLC'
-                        )
-                    )
-                else:  # no volume and subplot
-                    fig.add_trace(
-                        go.Candlestick(
-                            x=data.index,
-                            open=data['open'],
-                            high=data['high'],
-                            low=data['low'],
-                            close=data['close'],
-                            name='OHLC'
-                        ),
-                        row=candlestick_row,
-                        col=candlestick_col
-                    )
+            else:  # standalone case
+                fig.add_trace(candlestick)
 
             # Add volume only if requested
             if volume:
@@ -607,7 +666,7 @@ class Asset():
 
                 colors = ['#26A69A' if close >= open else '#EF5350' 
               for open, close in zip(data['open'], data['close'])]
-    
+
                 fig.add_trace(
                     go.Bar(
                         x=data.index,
@@ -634,10 +693,10 @@ class Asset():
 
             if volume:
                 layout_updates[f'xaxis{vol_row}_rangeslider_visible'] = False
-            
+
             if standalone:
                 layout_updates['title'] = title
-            
+
             # Update y-axes labels
             if standalone:  # Single figure
                 layout_updates['yaxis_title'] = f'Price ({self.currency})'
@@ -663,8 +722,262 @@ class Asset():
 
         return fig
 
-    def plot_returns_dist(self, *, log_rets=False, bins=100, filename=None, 
-                        fig=None, interactive=True, subplot_idx=None, show_stats=True):
+    def plot_SMA(self, *, window: int = 20, timeframe: str = '1d', start_date: Optional[DateLike] = None, end_date: Optional[DateLike] = None,
+                 resample: Optional[str] = None, interactive: bool = True, r: float = 0., ewm: bool = False, 
+                 alpha: Optional[float] = None, halflife: Optional[float] = None, bollinger_bands: bool = False, num_std: float = 2.,  
+                 filename: Optional[str] = None, fig: Optional[go.Figure | Figure] = None, 
+                 subplot_idx: Optional[int | tuple[int, int]] = None) -> go.Figure | Figure:
+        """Plots the moving average price of the underlying asset.
+
+        Args:
+            window (int): Rolling window. Defaults to 20
+            timeframe (str, optional): Determines which dataframe to use ('1d' for daily or '5m' for five minute data). 
+                Defaults to '1d'.
+            start_date (DateLike, optional): Start date for plotting range. Defaults to None.
+            end_date (DateLike, optional): End date for plotting range. Defaults to None.
+            resample (str, optional): Resampling frequency in pandas format (e.g., 'B' for business day).
+                Used primarily with 5-min data to remove flat regions during market close. Defaults to None.
+            interactive (bool, optional): Whether to create an interactive Plotly graph (True) 
+                or static Matplotlib graph (False). Defaults to True.
+            r (float): risk-free rate. Defaults to 0.
+            ewm (bool): Whether to use ewm (True) or rolling (False). Defaults to False
+            alpha (float, optional): Alpha parameter for ewm. Defaults to None
+            halflife (float, optional): Halflife parameter for ewm. Defaults to None
+            bollinger_bands (bool): Whether to calculate bollinger bands or not. Defaults to False
+            num_std (float): Number of standard deviations for bollinger bands. Defaults to 2.
+            filename (str, optional): Path to save the figure. Defaults to None.
+            fig (plotly.graph_objects.Figure | matplotlib.figure.Figure, optional): Existing figure to plot on.
+                Used for overlaying plots or creating subplots. Defaults to None.
+            subplot_idx (int | tuple[int, int], optional): Subplot position specifier.
+                For Matplotlib: integer index.
+                For Plotly: (row, col) tuple. Defaults to None.
+
+        Returns:
+            (plotly.graph_objects.Figure | matplotlib.figure.Figure): Moving average price of underlying asset.
+                Returns Plotly figure if interactive=True, Matplotlib figure otherwise.
+        """
+        # get MA data
+        data = self.rolling_stats(window=window, five_min=True if timeframe != '1d' else False,
+                                r=r, ewm=ewm, alpha=alpha, halflife=halflife, 
+                                bollinger_bands=bollinger_bands, num_std=num_std)
+        
+        if start_date is not None:
+            data = data[data.index >= start_date]
+        if end_date is not None:
+            data = data[data.index <= end_date]
+        if resample is not None:
+            # aggregate parameters for resampling
+            agg = {
+                    'close_mean': 'last',
+                    'adj_close_mean': 'last',
+                    'close_std': 'mean',
+                    'adj_close_std': 'mean',
+                    'rets_mean': 'sum',
+                    'log_rets_mean': 'sum',
+                    'rets_std': 'mean',
+                    'log_rets_std': 'mean',
+                    'sharpe': 'mean'
+                }
+
+            boll_agg = {
+                'bol_up': 'last',
+                'bol_low': 'last'
+            }
+
+            if bollinger_bands:
+                agg = agg | boll_agg
+
+            data = data.resample(resample).agg(agg)
+
+        data = data.dropna()
+
+        # configure parameter text
+        if alpha is not None:
+            param = f'{alpha=}'
+        elif halflife is not None:
+            param = f'{halflife=}'
+        else:
+            param = f'{window=}'
+
+        # static plot
+        if not interactive:
+
+            # create or use existing figure
+            standalone = True
+            if fig is None:
+                fig, ax = plt.subplots(figsize=(12, 6))
+            else:
+                ax = fig.axes[subplot_idx] if subplot_idx is not None else fig.gca()
+                standalone = False
+
+            plt.style.use('seaborn-v0_8')
+
+            # Create the base plot with the main price line
+            sns.lineplot(data=data, x=data.index, y='close_mean', 
+                        color='#2962FF', linewidth=2, label=f'{self.ticker} MA ({param})',
+                        ax=ax)
+
+            if bollinger_bands:
+                # Add the Bollinger Bands
+                sns.lineplot(data=data, x=data.index, y='bol_up', 
+                            color='#FF4081', linestyle='--', linewidth=1, label='Upper Band',
+                            ax=ax)
+                sns.lineplot(data=data, x=data.index, y='bol_low', 
+                            color='#FF4081', linestyle='--', linewidth=1, label='Lower Band',
+                            ax=ax)
+
+                # Fill between the bands
+                ax.fill_between(data.index, data['bol_low'], data['bol_up'], 
+                                alpha=0.1, color='#2962FF')
+
+            # Customize the plot
+            ax.set_title(f'{self.ticker} Moving Average ({param}) {f'with Bollinger Bands ({num_std=})' if bollinger_bands else ''}', pad=20)
+            ax.set_xlabel('Date')
+            ax.set_ylabel(f'Price ({self.currency})')
+
+            def format_prices(x, p):
+                if x >= 1e3:
+                    return f'{x/1e3:.1f}K'
+                else:
+                    return f'{x:.1f}'
+
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(format_prices))
+            ax.legend(loc='upper left', framealpha=0.9)
+            ax.grid(True, alpha=0.2)
+            plt.xticks(rotation=0)
+
+            if filename is not None:
+                fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
+
+            if standalone:
+                plt.show()
+
+        # interactive plot
+        else:
+            # create or use existing figure
+            standalone = False
+            if fig is None:
+                fig = go.Figure()
+                standalone = True
+
+            # Add main price line
+            fig.add_trace(
+                go.Scatter(
+                    x=data.index,
+                    y=data['close_mean'],
+                    line=dict(
+                        color='#2962FF',
+                        width=2,
+                        dash='solid'
+                    ),
+                    name=f'{self.ticker} MA {param}'
+                ),
+                row=subplot_idx[0] if subplot_idx else None,
+                col=subplot_idx[1] if subplot_idx else None
+            )
+
+            if bollinger_bands:
+                # Add lower band
+                fig.add_trace(go.Scatter(
+                    x=data.index,
+                    y=data['bol_low'],
+                    name='Lower Band',
+                    line=dict(color='#FF4081', width=1, dash='dash'),
+                    mode='lines',
+                    showlegend=True
+                    ),
+                    row=subplot_idx[0] if subplot_idx else None,
+                    col=subplot_idx[1] if subplot_idx else None
+                )
+
+                # Add upper band with fill
+                fig.add_trace(go.Scatter(
+                    x=data.index,
+                    y=data['bol_up'],
+                    name='Upper Band',
+                    line=dict(color='#FF4081', width=1, dash='dash'),
+                    mode='lines',
+                    fill='tonexty',
+                    fillcolor='rgba(68, 68, 255, 0.1)',
+                    showlegend=True
+                    ),
+                    row=subplot_idx[0] if subplot_idx else None,
+                    col=subplot_idx[1] if subplot_idx else None
+                )
+
+            # update layout
+            fig.update_layout(
+                title=dict(
+                    text=f'{self.ticker} Moving Average ({param}) {f'with Bollinger Bands ({num_std=})' if bollinger_bands else ''}',
+                    x=0.5,  # Center the title
+                    y=0.95
+                ) if standalone else None,
+                paper_bgcolor='white',
+                plot_bgcolor='rgba(240,240,240,0.95)',
+                xaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    title=None,
+                ),
+                yaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    title=f'Price ({self.currency})',
+                ),
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=0.01,
+                    bgcolor='rgba(255,255,255,0.8)'
+                ),
+                hovermode='x unified'
+            )
+
+            if not standalone:
+                fig.update_yaxes(
+                    title_text=f'Price ({self.currency})',
+                    row=subplot_idx[0] if subplot_idx else None, 
+                    col=subplot_idx[1] if subplot_idx else None
+                )
+                fig.update_xaxes(
+                    title_text=f'{self.ticker} Moving Average {f'with Bollinger Bands ({num_std=})' if bollinger_bands else ''}', 
+                    row=subplot_idx[0] if subplot_idx else None, 
+                    col=subplot_idx[1] if subplot_idx else None
+                )
+
+            if standalone:
+                fig.show()
+
+            if filename is not None:
+                fig.write_image(filename)
+
+        return fig
+
+    def plot_returns_dist(self, *, log_rets: bool = False, bins: int = 100, interactive: bool = True, 
+                        filename: Optional[str] = None, fig: Optional[go.Figure | Figure] = None, 
+                        subplot_idx: Optional[int | tuple[int, int]] = None, show_stats: bool = True) -> go.Figure | Figure:
+        """Plots the returns distribution histogram of the underlying asset.
+
+        Args:
+            log_rets (bool): Whether to use log returns (True) or normal returns (False)
+                Defaults to False
+            interactive (bool, optional): Whether to create an interactive Plotly graph (True) 
+                or static Matplotlib graph (False). Defaults to True.
+            filename (str, optional): Path to save the figure. Defaults to None.
+            fig (plotly.graph_objects.Figure | matplotlib.figure.Figure, optional): Existing figure to plot on.
+                Used for overlaying plots or creating subplots. Defaults to None.
+            subplot_idx (int | tuple[int, int], optional): Subplot position specifier.
+                For Matplotlib: integer index.
+                For Plotly: (row, col) tuple. Defaults to None.
+            show_stats (bool): Whether or not to show distribution stats. Defaults to True
+
+        Returns:
+            (plotly.graph_objects.Figure | matplotlib.figure.Figure): Returns distribution histogram of underlying asset.
+                Returns Plotly figure if interactive=True, Matplotlib figure otherwise.
+        """
 
         data = self.daily['log_rets'] if log_rets else self.daily['rets']
         data = data.dropna()
@@ -677,10 +990,12 @@ class Asset():
             f'Kurtosis: {stats.kurtosis(data):.4f}'
         )
 
+        # static plot
         if not interactive:
-            # Set style
-            plt.style.use('seaborn-v0_8')  # Professional looking style
 
+            plt.style.use('seaborn-v0_8')
+
+            # create or use existing figure
             if fig is None:
                 standalone = True
                 fig, ax = plt.subplots(figsize=(12, 7))
@@ -688,12 +1003,12 @@ class Asset():
                 standalone = False
                 ax = fig.axes[subplot_idx] if subplot_idx is not None else fig.gca()
 
-            # Create histogram with improved styling
+            # Create histogram
             sns.histplot(data, 
                         bins=bins,
-                        color='#2E86C1',  # Professional blue color
-                        alpha=0.7,  # Slight transparency
-                        edgecolor='white',  # White edges for better contrast
+                        color='#2E86C1',
+                        alpha=0.7,
+                        edgecolor='white',
                         ax=ax)
 
             # Customize the plot
@@ -706,28 +1021,30 @@ class Asset():
             ax.spines['right'].set_visible(False)
 
             if show_stats:
-                # Add stats box with better styling
+                # Add stats box
                 plt.text(0.75, 0.85, stats_text,
                         transform=ax.transAxes,
                         bbox=dict(
                             facecolor='white',
-                            edgecolor='#2E86C1',  # Match histogram color
+                            edgecolor='#2E86C1',
                             alpha=0.9,
                             boxstyle='round,pad=0.5'
                         ),
                         fontsize=10,
                         verticalalignment='top')
 
-            # Add grid with lighter color
             ax.grid(True, alpha=0.3, linestyle='--')
-
-            # Adjust layout
             fig.subplots_adjust(hspace=0.4)
 
             if filename is not None:
                     fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
 
+            if standalone:
+                plt.show()
+
+        # interactive plot
         else:
+            # create or use existing figure
             standalone = False
             if fig is None:
                 fig = go.Figure()
@@ -735,6 +1052,7 @@ class Asset():
 
             bins = np.linspace(data.min(), data.max(), bins + 1)
 
+            # create histogram
             fig.add_trace(
                 go.Histogram(
                     x=data,
@@ -749,9 +1067,10 @@ class Asset():
                 col=subplot_idx[1] if subplot_idx else None
             )
 
+            # configure statsbox position
             xref = 'paper'
             yref = 'paper'
-            
+
             if subplot_idx:
                 xref = f'x{subplot_idx[0] if subplot_idx[0] != 1 else ''} domain'
                 yref = f'y{subplot_idx[0] if subplot_idx[0] != 1 else ''} domain'
@@ -769,8 +1088,8 @@ class Asset():
                     bgcolor='white',
                     bordercolor='black',
                     borderwidth=1,
-                    xanchor='right',  # Right-align the box
-                    yanchor='top'     # Top-align the box
+                    xanchor='right',
+                    yanchor='top'
                 )
 
             fig.update_layout(
@@ -787,7 +1106,7 @@ class Asset():
                         xaxis_title='Returns',
                         yaxis_title=f'Count'
                     )
-                
+
                 fig.show()
             else:
                 fig.update_yaxes(
@@ -806,9 +1125,16 @@ class Asset():
 
         return fig
 
+    def resample(self, period: str, five_min: bool = False) -> DataFrame:
+        """Resamples the asset data
 
-    def resample(self, period, five_min=False):
+        Args:
+            period (str): Resampling frequency in pandas format (e.g., 'B' for business day).
+            five_min (bool): Whether to use 5min data (True) or daily data (False). Defaults to False
 
+        Returns:
+            pandas.core.frame.DataFrame: df of resampled data
+        """
         if five_min:
             data = self.five_minute
         else:
@@ -826,15 +1152,34 @@ class Asset():
         })
 
         data = data.dropna()
-        
+
         return data
 
-    def _rolling_stats(self, *, window=20, five_min=False, r=0., ewm=False, alpha=None, halflife=None, bollinger_bands=False, num_std=2):
-        
+    def rolling_stats(self, *, window: int = 20, five_min: bool = False, r: float = 0., ewm: bool = False, 
+                       alpha: Optional[float] = None, halflife: Optional[float] = None, bollinger_bands: bool = False, 
+                       num_std: float = 2., sharpe_ratio: bool = False) -> DataFrame:
+        """Calculate rolling stats for asset data
+
+        Args:
+            window (int): Rolling window. Defaults to 20
+            five_min (bool): Whether to use 5min data (True) or daily data (False). Defaults to False
+            r (float): risk-free rate. Defaults to 0.
+            ewm (bool): Whether to use ewm (True) or rolling (False). Defaults to False
+            alpha (float, optional): Alpha parameter for ewm. Defaults to None
+            halflife (float, optional): Halflife parameter for ewm. Defaults to None
+            bollinger_bands (bool): Whether to calculate bollinger bands or not. Defaults to False
+            num_std (float): Number of standard deviations for bollinger bands. Defaults to 2.
+            sharpe_ratio (bool): Whether or not to calculate rolling Sharpe ratio. Defaults to False
+
+        Returns:
+            pandas.core.frame.DataFrame: df of the rolling data with mean and standard deviation
+                for close prices and returns as well as sharpe ratio if specified
+        """
+
         if five_min:
             data = self.five_minute
             if self.asset_type == 'cryptocurrency':
-                annualization_factor = 252 * 24 * 12
+                annualization_factor = 252 * 24 * 12  # 24/7 trading
             else:
                 annualization_factor = 252 * 78  # Assuming ~78 5-min periods per day
         else:
@@ -842,19 +1187,22 @@ class Asset():
             annualization_factor = 252  # Trading days in a year
 
         roll_df = pd.DataFrame()
-        cols = ['close', 'adj_close', 'rets', 'log_rets']
 
+        param = {}
+        if ewm:
+            if alpha is not None:
+                param['alpha'] = alpha
+            elif halflife is not None:
+                param['halflife'] = halflife
+            else:
+                param['span'] = window
+
+        # calculate mean and std rolling data for close prices and returns
+        cols = ['close', 'adj_close', 'rets', 'log_rets']
         for col in cols:
             if ewm:
-                if alpha is not None:
-                    roll_df[f'{col}_mean'] = data[f'{col}'].ewm(alpha=alpha).mean()
-                    roll_df[f'{col}_std'] = data[f'{col}'].ewm(alpha=alpha).std()
-                elif halflife is not None:
-                    roll_df[f'{col}_mean'] = data[f'{col}'].ewm(halflife=halflife).mean()
-                    roll_df[f'{col}_std'] = data[f'{col}'].ewm(halflife=halflife).std()
-                else:
-                    roll_df[f'{col}_mean'] = data[f'{col}'].ewm(span=window).mean()
-                    roll_df[f'{col}_std'] = data[f'{col}'].ewm(span=window).std()
+                roll_df[f'{col}_mean'] = data[f'{col}'].ewm(**param).mean()
+                roll_df[f'{col}_std'] = data[f'{col}'].ewm(**param).std()
             else:
                 roll_df[f'{col}_mean'] = data[f'{col}'].rolling(window=window).mean()
                 roll_df[f'{col}_std'] = data[f'{col}'].rolling(window=window).std()
@@ -862,17 +1210,27 @@ class Asset():
         roll_df = roll_df.dropna()
 
         # Calculate annualized Sharpe ratio
-        daily_rf_rate = (1 + r) ** (1/annualization_factor) - 1
-        excess_returns = roll_df['rets_mean'] - daily_rf_rate
-        roll_df['sharpe'] = (excess_returns / roll_df['rets_std']) * np.sqrt(annualization_factor)
+        if sharpe_ratio:
+            daily_rf_rate = (1 + r) ** (1/annualization_factor) - 1
+            excess_returns = roll_df['rets_mean'] - daily_rf_rate
+            roll_df['sharpe'] = (excess_returns / roll_df['rets_std']) * np.sqrt(annualization_factor)
 
+        # add bollinger bands
         if bollinger_bands:
             roll_df = self._add_bollinger_bands(roll_df, num_std=num_std)
 
         return roll_df
 
     @property
-    def stats(self):
+    def stats(self) -> dict:
+        """Basic statistics for the underlying asset
+           - Return statistics
+           - Price statistics
+           - Distribution statistics
+
+        Returns:
+        dict: dictionary containing statistics of the asset
+        """
         stats = {}
 
         # return statistics
@@ -914,220 +1272,24 @@ class Asset():
 
         return stats
 
-    def plot_SMA(self, *, window=20, timeframe='1d', r=0., ewm=False, alpha=None, halflife=None, 
-                 bollinger_bands=False, num_std=2, interactive=True, filename=None, start_date=None, 
-                 end_date=None, resample=None, fig=None, subplot_idx=None):
+    def _add_bollinger_bands(self, df: DataFrame, num_std: float = 2.) -> DataFrame:
+        """Helper method to calculate bollinger bands
         
-        data = self._rolling_stats(window=window, five_min=True if timeframe != '1d' else False,
-                                r=r, ewm=ewm, alpha=alpha, halflife=halflife, 
-                                bollinger_bands=bollinger_bands, num_std=num_std)
-        
-        agg = {
-                'close_mean': 'last',
-                'adj_close_mean': 'last',
-                'close_std': 'mean',
-                'adj_close_std': 'mean',
-                'rets_mean': 'sum',
-                'log_rets_mean': 'sum',
-                'rets_std': 'mean',
-                'log_rets_std': 'mean',
-                'sharpe': 'mean'
-            }
-        
-        boll_agg = {
-            'bol_up': 'last',
-            'bol_low': 'last'
-        }
+        Args:
+            df (pandas.core.frame.DataFrame): df to add bollinger bands onto
+            num_std (float): Number of standard deviations away for bollinger bands
 
-
-        if bollinger_bands:
-            agg = agg | boll_agg
-        
-        if start_date is not None:
-            data = data[data.index >= start_date]
-        if end_date is not None:
-            data = data[data.index <= end_date]
-        if resample is not None:
-            data = data.resample(resample).agg(agg)
-
-        data = data.dropna()
-
-        if alpha is not None:
-            param = f'{alpha=}'
-        elif halflife is not None:
-            param = f'{halflife=}'
-        else:
-            param = f'{window=}'
-        
-        if not interactive:
-
-            if fig is None:
-                fig, ax = plt.subplots(figsize=(12, 6))
-            else:
-                ax = fig.axes[subplot_idx] if subplot_idx is not None else fig.gca()
-
-            # Set style
-            plt.style.use('seaborn-v0_8')
-
-            # Create the base plot with the main price line
-            sns.lineplot(data=data, x=data.index, y='close_mean', 
-                        color='#2962FF', linewidth=2, label=f'{self.ticker} MA ({param})',
-                        ax=ax)
-
-            if bollinger_bands:
-                # Add the Bollinger Bands
-                sns.lineplot(data=data, x=data.index, y='bol_up', 
-                            color='#FF4081', linestyle='--', linewidth=1, label='Upper Band',
-                            ax=ax)
-                sns.lineplot(data=data, x=data.index, y='bol_low', 
-                            color='#FF4081', linestyle='--', linewidth=1, label='Lower Band',
-                            ax=ax)
-
-                # Fill between the bands
-                ax.fill_between(data.index, data['bol_low'], data['bol_up'], 
-                                alpha=0.1, color='#2962FF')
-
-            # Customize the plot
-            ax.set_title(f'{self.ticker} Moving Average {f'with Bollinger Bands ({num_std=})' if bollinger_bands else ''}', pad=20)
-            ax.set_xlabel('Date')
-            ax.set_ylabel(f'Price ({self.currency})')
-
-            def format_prices(x, p):
-                if x >= 1e3:
-                    return f'{x/1e3:.1f}K'
-                else:
-                    return f'{x:.1f}'
-
-            ax.yaxis.set_major_formatter(plt.FuncFormatter(format_prices))
-
-            # Adjust legend
-            ax.legend(loc='upper left', framealpha=0.9)
-
-            # Adjust grid settings
-            ax.grid(True, alpha=0.2)
-
-            # Rotate x-axis labels if needed
-            plt.xticks(rotation=0)
-
-            # Adjust layout
-            # fig.tight_layout()
-
-            if filename is not None:
-                fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
-
-        else:
-            standalone = False
-            if fig is None:
-                fig = go.Figure()
-                standalone = True
-
-            # Add main price line with explicit solid style
-            fig.add_trace(
-                go.Scatter(
-                    x=data.index,
-                    y=data['close_mean'],
-                    line=dict(
-                        color='#2962FF',
-                        width=2,
-                        dash='solid'  # Explicitly set solid line
-                    ),
-                    name=f'{self.ticker} MA {param}'
-                ),
-                row=subplot_idx[0] if subplot_idx else None,
-                col=subplot_idx[1] if subplot_idx else None
-            )
-
-            if bollinger_bands:
-                # Add lower band
-                fig.add_trace(go.Scatter(
-                    x=data.index,
-                    y=data['bol_low'],
-                    name='Lower Band',
-                    line=dict(color='#FF4081', width=1, dash='dash'),
-                    mode='lines',
-                    showlegend=True
-                    ),
-                    row=subplot_idx[0] if subplot_idx else None,
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-
-                # Add upper band with fill
-                fig.add_trace(go.Scatter(
-                    x=data.index,
-                    y=data['bol_up'],
-                    name='Upper Band',
-                    line=dict(color='#FF4081', width=1, dash='dash'),
-                    mode='lines',
-                    fill='tonexty',
-                    fillcolor='rgba(68, 68, 255, 0.1)',
-                    showlegend=True
-                    ),
-                    row=subplot_idx[0] if subplot_idx else None,
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-
-            # Update the layout for a cleaner look
-
-            fig.update_layout(
-                title=dict(
-                    text=f'{self.ticker} Moving Average {f'with Bollinger Bands ({num_std=})' if bollinger_bands else ''}',
-                    x=0.5,  # Center the title
-                    y=0.95
-                ) if standalone else None,
-                paper_bgcolor='white',
-                plot_bgcolor='rgba(240,240,240,0.95)',  # Light gray background
-                xaxis=dict(
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='rgba(128,128,128,0.2)',
-                    title=None,  # Remove x-axis title if it's obvious
-                ),
-                yaxis=dict(
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='rgba(128,128,128,0.2)',
-                    title=f'Price ({self.currency})',
-                ),
-                legend=dict(
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="left",
-                    x=0.01,
-                    bgcolor='rgba(255,255,255,0.8)'
-                ),
-                hovermode='x unified'  # Shows all values for a given x-position
-            )
-
-            if not standalone:
-                fig.update_yaxes(
-                    title_text=f'Price ({self.currency})',
-                    row=subplot_idx[0] if subplot_idx else None, 
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-                fig.update_xaxes(
-                    title_text=f'{self.ticker} Moving Average {f'with Bollinger Bands ({num_std=})' if bollinger_bands else ''}', 
-                    row=subplot_idx[0] if subplot_idx else None, 
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-            
-            if standalone:
-                fig.show()
-
-            if filename is not None:
-                fig.write_image(filename)
-
-        return fig
-        
-
-    def _add_bollinger_bands(self, df, num_std=2):
+        Returns:
+            pandas.core.frame.DataFrame: original df with bollinger bands columns
+            """
         df['bol_up'] = df['close_mean'] + num_std * df['close_std']
         df['bol_low'] = df['close_mean'] - num_std * df['close_std']
 
         return df
 
-    # TODO:
-    # backtest SMA strategy
-    # optimize SMA window
-    # plot more diagrams
-    # add more technical indicators (RSI, MACD, ATR)
-    # simple default dashboard
+# TODO:
+# backtest SMA strategy
+# optimize SMA window
+# plot more diagrams
+# add more technical indicators (RSI, MACD, ATR)
+# simple default dashboard

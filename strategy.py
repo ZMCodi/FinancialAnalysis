@@ -12,26 +12,44 @@ class TAEngine:
 
     def calculate_ma(self, data, ewm, param_type, param, name):
         key = f'ma_{param_type}={param}, {name=}'
-        if key in self.cache:
-            return self.cache[key]
+        if key not in self.cache:
 
-        if ewm:
-            self.cache[key] = data.ewm(**{f'{param_type}': param}).mean()
-        else:
-            self.cache[key] = data.rolling(window=param).mean()
+            if ewm:
+                self.cache[key] = data.ewm(**{f'{param_type}': param}).mean()
+            else:
+                self.cache[key] = data.rolling(window=param).mean()
 
         return self.cache[key]
 
     def calculate_rsi(self, data, window, name):
         key = f'rsi_window={window}, {name=}'
-        if key in self.cache:
-            return self.cache[key]
+        if key not in self.cache:
 
-        delta = data.diff()
-        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/window, min_periods=window).mean()
-        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/window, min_periods=window).mean()
-        rs = gain / loss
-        self.cache[key] = 100 - (100 / (1 + rs))
+            delta = data.diff()
+            gain = (delta.where(delta > 0, 0)).ewm(alpha=1/window, min_periods=window).mean()
+            loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/window, min_periods=window).mean()
+            rs = gain / loss
+            self.cache[key] = 100 - (100 / (1 + rs))
+
+        return self.cache[key]
+
+    def calculate_macd(self, data, windows, name):
+        key = f'macd_{windows=}, {name=}'
+        if key not in self.cache:
+            results = pd.DataFrame(index=data.index)
+
+            alpha_fast = 2 / (windows[0] + 1)
+            alpha_slow = 2 / (windows[1] + 1)
+            alpha_signal = 2 / (windows[2] + 1)
+
+            results['macd'] = (self.calculate_ma(data, True, 'alpha', alpha_fast, name)
+                                - self.calculate_ma(data, True, 'alpha', alpha_slow, name))
+
+            results['signal_line'] = self.calculate_ma(results['macd'], True, 'alpha', alpha_signal, name)
+
+            results['macd_hist'] = results['signal_line'] - results['macd']
+
+            self.cache[key] = results
 
         return self.cache[key]
 
@@ -122,7 +140,7 @@ class Strategy(ABC):
 
             if standalone:
                 layout['title'] = dict(
-                        text=f'{self.asset.ticker} {name} Backtest ({self.p1}/{self.p2})',
+                        text=f'{self.asset.ticker} {name} Backtest ({self.params})',
                         x=0.5,
                         y=0.95
                     )
@@ -175,7 +193,7 @@ class Strategy(ABC):
                     col=subplot_idx[1] if subplot_idx else None
                 )
                 fig.update_xaxes(
-                    title_text=f'{self.asset.ticker} {name} Backtest ({self.p1}/{self.p2})', 
+                    title_text=f'{self.asset.ticker} {name} Backtest ({self.params})', 
                     row=subplot_idx[0] if subplot_idx else None, 
                     col=subplot_idx[1] if subplot_idx else None
                 )
@@ -202,8 +220,7 @@ class MA_Crossover(Strategy):
     def __get_data(self):
         self.daily = pd.DataFrame(self.asset.daily[['adj_close', 'log_rets']])
         self.five_min = pd.DataFrame(self.asset.five_minute[['adj_close', 'log_rets']])
-        self.p1 = self.short
-        self.p2 = self.long
+        self.params = f'{self.short}/{self.long}'
 
         for i, df in enumerate([self.daily, self.five_min]):
             data = df['adj_close']
@@ -212,6 +229,7 @@ class MA_Crossover(Strategy):
 
             df['short'] = self.engine.calculate_ma(data, self.ewm, ptype, self.short, name)
             df['long'] = self.engine.calculate_ma(data, self.ewm, ptype, self.long, name)
+            df.dropna(inplace=True)
 
             df['signal'] = np.where(df['short'] > df['long'], 1, -1)
             df.rename(columns=dict(log_rets='returns'), inplace=True)
@@ -435,8 +453,7 @@ class RSI(Strategy):
         self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
         self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
 
-        self.p1 = self.ub
-        self.p2 = self.lb
+        self.params = f'{self.ub}/{self.lb}'
 
         for i, df in enumerate([self.daily, self.five_min]):
             data = df['adj_close']
@@ -698,9 +715,77 @@ class RSI(Strategy):
         return results
 
 
+class MACD(Strategy):
+
+    def __init__(self, asset, fast=12, slow=26, signal=9, signal_type=None):
+        super().__init__(asset)
+        self.__slow = slow
+        self.__fast = fast
+        self.__signal = signal
+        if signal_type is not None:
+            self.signal_type = list(signal_type)
+        else:
+            self.signal_type = ['crossover', 'divergence', 'hidden divergence', 'momentum', 'double peak/trough']
+        self.engine = TAEngine()
+        self.__get_data()
+
+    def __get_data(self):
+        self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
+        self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
+
+        self.params = f'{self.fast}/{self.slow}/{self.signal}'
+
+        for i, df in enumerate([self.daily, self.five_min]):
+            data = df['adj_close']
+            name = 'daily' if i == 0 else 'five_min'
+
+            df[['macd', 'signal_line', 'macd_hist']] = self.engine.calculate_macd(data, [self.fast, self.slow, self.signal], name)
+            df.dropna(inplace=True)
+
+            if i == 0:
+                self.daily = df
+            else:
+                self.five_min = df
+    
+    @property
+    def fast(self):
+        return self.__fast
+
+    @fast.setter
+    def fast(self, value):
+        self.__fast = value
+        self.__get_data()
+
+    @property
+    def slow(self):
+        return self.__slow
+
+    @slow.setter
+    def slow(self, value):
+        self.__slow= value
+        self.__get_data()
+
+    @property
+    def signal(self):
+        return self.__signal
+
+    @signal.setter
+    def signal(self, value):
+        self.__signal = value
+        self.__get_data()
+
+    def plot(self):
+        pass
+
+    def optimize(self):
+        pass
+
+
+
+
 # TODO:
 # parrallelize backtest and optimize methods
-# add MACD and BB strategies
+# add MACD, ATR and BB strategies
 # add transaction costs
 # add risk management
 # add algo to reduce number of trades (e.g. minimum holding period, dead zone, trend filter)

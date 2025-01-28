@@ -695,7 +695,7 @@ class RSI(Strategy):
 
 class MACD(Strategy):
 
-    def __init__(self, asset, fast=12, slow=26, signal=9, signal_type=None):
+    def __init__(self, asset, fast=12, slow=26, signal=9, signal_type=None, combine=None):
         super().__init__(asset)
         self.__slow = slow
         self.__fast = fast
@@ -704,6 +704,10 @@ class MACD(Strategy):
             self.signal_type = list(signal_type)
         else:
             self.signal_type = ['crossover', 'divergence', 'hidden divergence', 'momentum', 'double peak/trough']
+        if combine is not None:
+            self.__combine = str(combine)
+        else:
+            self.__combine = 'voting'
         self.engine = TAEngine()
         self.__get_data()
 
@@ -724,6 +728,8 @@ class MACD(Strategy):
                 self.daily = df
             else:
                 self.five_min = df
+
+            df['signal'] = sg.macd()
     
     @property
     def fast(self):
@@ -750,6 +756,15 @@ class MACD(Strategy):
     @signal.setter
     def signal(self, value):
         self.__signal = value
+        self.__get_data()
+
+    @property
+    def combine(self):
+        return self.__combine
+
+    @combine.setter
+    def combine(self, value):
+        self.__combine = value
         self.__get_data()
 
     def plot(self):

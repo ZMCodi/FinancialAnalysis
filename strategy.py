@@ -261,8 +261,8 @@ class MA_Crossover(Strategy):
 
     def change_params(self, param_type, short, long, ewm=None):
         self.ptype = param_type
-        self.short = short
-        self.long = long
+        self.__short = short
+        self.__long = long
         self.ewm = ewm if ewm is not None else self.ewm
         self.__get_data()
 
@@ -336,7 +336,7 @@ class MA_Crossover(Strategy):
         layout = {}
 
         layout['title'] = dict(
-                text=f'{self.asset.ticker} MA Crossover ({self.short}/{self.long})',
+                text=f'{self.asset.ticker} MA Crossover ({self.params})',
                 x=0.5,
                 y=0.95
             )
@@ -441,9 +441,9 @@ class RSI(Strategy):
         super().__init__(asset)
         self.__ub = ub
         self.__lb = lb
-        self.window = window
-        self.exit = exit
-        self.m_rev = m_rev
+        self.__window = window
+        self.__exit = exit
+        self.__m_rev = m_rev
         self.__m_rev_bound = m_rev_bound
         self.engine = TAEngine()
         self.__get_data()
@@ -494,6 +494,33 @@ class RSI(Strategy):
         self.__get_data()
 
     @property
+    def m_rev(self):
+        return self.__m_rev
+
+    @m_rev.setter
+    def m_rev(self, value):
+        self.__m_rev = value
+        self.__get_data()
+
+    @property
+    def exit(self):
+        return self.__exit
+
+    @exit.setter
+    def exit(self, value):
+        self.__exit = value
+        self.__get_data()
+
+    @property
+    def window(self):
+        return self.__window
+
+    @window.setter
+    def window(self, value):
+        self.__window = value
+        self.__get_data()
+
+    @property
     def m_rev_bound(self):
         return self.__m_rev_bound
 
@@ -502,16 +529,16 @@ class RSI(Strategy):
         self.__m_rev_bound = value
         self.__get_data()
 
-    def change_params(self, ub, lb, window=None, exit=None, m_rev=None, m_rev_bound=None):
-        self.ub = ub
-        self.lb = lb
-        self.window = window if window is not None else self.window
-        self.exit = exit if exit is not None else self.exit
-        self.m_rev = m_rev if m_rev is not None else self.m_rev
-        self.m_rev_bound = m_rev_bound if m_rev_bound is not None else self.m_rev_bound
+    def change_params(self, ub=None, lb=None, window=None, exit=None, m_rev=None, m_rev_bound=None):
+        self.__ub = ub if ub is not None else self.ub
+        self.__lb = lb if lb is not None else self.lb
+        self.__window = window if window is not None else self.window
+        self.__exit = exit if exit is not None else self.exit
+        self.__m_rev = m_rev if m_rev is not None else self.m_rev
+        self.__m_rev_bound = m_rev_bound if m_rev_bound is not None else self.m_rev_bound
         self.__get_data()
 
-    def plot(self, timeframe='1d', start_date=None, end_date=None, rsi=True,
+    def plot(self, timeframe='1d', start_date=None, end_date=None,
             candlestick=True, show_signal=True):
 
         df = self.daily if timeframe == '1d' else self.five_min
@@ -523,15 +550,12 @@ class RSI(Strategy):
 
         df.dropna(inplace=True)
 
-        if rsi:
-            fig = make_subplots(rows=2, cols=1, 
-                            shared_xaxes=True, 
-                            vertical_spacing=0.03, 
-                            row_heights=[0.7, 0.3],
-                            specs=[[{"secondary_y": True}],
-                            [{"secondary_y": False}]])
-        else:
-            fig = go.Figure()
+        fig = make_subplots(rows=2, cols=1, 
+                        shared_xaxes=True, 
+                        vertical_spacing=0.03, 
+                        row_heights=[0.7, 0.3],
+                        specs=[[{"secondary_y": True}],
+                        [{"secondary_y": False}]])
 
         if candlestick:
             price = go.Candlestick(
@@ -554,13 +578,12 @@ class RSI(Strategy):
                         name=f'{self.asset.ticker} Price',
             )
 
-        if rsi:
-            RSI = go.Scatter(
-                    x=df.index,
-                    y=df['rsi'],
-                    line=dict(color='blue', width=1.5),
-                    name='RSI'
-            )
+        RSI = go.Scatter(
+                x=df.index,
+                y=df['rsi'],
+                line=dict(color='blue', width=1.5),
+                name='RSI'
+        )
 
         if show_signal:
             signal = go.Scatter(
@@ -571,23 +594,19 @@ class RSI(Strategy):
                         yaxis='y2'
             )
 
-        fig.add_trace(price, row=1 if rsi else None, col=1 if rsi else None)
+        fig.add_trace(price)
 
-        if rsi:
-            fig.add_trace(RSI, row=2, col=1)
-            fig.add_hline(y=self.ub, row=2, col=1)
-            fig.add_hline(y=self.lb, row=2, col=1)
+        fig.add_trace(RSI, row=2, col=1)
+        fig.add_hline(y=self.ub, row=2, col=1)
+        fig.add_hline(y=self.lb, row=2, col=1)
 
         if show_signal:
-            fig.add_trace(signal,
-                        row=1 if rsi else None, 
-                        col=1 if rsi else None, 
-                        secondary_y=True if rsi else None)
+            fig.add_trace(signal)
 
         layout = {}
 
         layout['title'] = dict(
-                text=f'{self.asset.ticker} RSI Strategy ({self.ub}/{self.lb})',
+                text=f'{self.asset.ticker} RSI Strategy ({self.params})',
                 x=0.5,
                 y=0.95
             )
@@ -621,11 +640,10 @@ class RSI(Strategy):
                     ticktext=['Sell', 'Buy']
                 )
 
-        if rsi:
-            layout['yaxis3'] = dict(
-                    title='RSI',
-                    side='right'
-                )
+        layout['yaxis3'] = dict(
+                title='RSI',
+                side='right'
+            )
 
         layout['legend'] = dict(
                 yanchor="bottom",
@@ -712,9 +730,10 @@ class MACD(Strategy):
             self.__combine = 'majority'
 
         if weights is not None:
-            self.__weights = weights
+            self.__weights = np.array(weights)
+            self.__weights /= np.sum(weights)
         else:
-            self.__weights = [1 / len(self.signal_type)] * len(self.signal_type)
+            self.__weights = np.array([1 / len(self.signal_type)] * len(self.signal_type))
 
         self.__threshold = threshold
 
@@ -734,11 +753,6 @@ class MACD(Strategy):
             df[['macd', 'signal_line', 'macd_hist']] = self.engine.calculate_macd(data, [self.fast, self.slow, self.signal], name)
             df.dropna(inplace=True)
 
-            if i == 0:
-                self.daily = df
-            else:
-                self.five_min = df
-
             df['signal'] = sg.macd(df['macd'], df['log_rets'], self.signal_type, 
                                    self.combine, self.threshold, self.weights)
 
@@ -749,7 +763,7 @@ class MACD(Strategy):
                 self.daily = df
             else:
                 self.five_min = df
-    
+
     @property
     def fast(self):
         return self.__fast
@@ -792,7 +806,7 @@ class MACD(Strategy):
 
     @weights.setter
     def weights(self, value):
-        self.__weights = value
+        self.__weights = np.array(value)
         self.__get_data()
 
     @property
@@ -804,8 +818,155 @@ class MACD(Strategy):
         self.__threshold = value
         self.__get_data()
 
-    def plot(self):
-        pass
+    def change_params(self, fast=None, slow=None, signal=None, combine=None, weights=None, threshold=None):
+        self.__fast = fast if fast is not None else self.fast
+        self.__slow = slow if slow is not None else self.slow
+        self.__signal = signal if signal is not None else self.signal
+        self.__combine = combine if combine is not None else self.combine
+        self.__weights = np.array(weights) if weights is not None else self.weights
+        self.__threshold = threshold if threshold is not None else self.threshold
+        self.__get_data()
+
+    def plot(self, timeframe='1d', start_date=None, end_date=None,
+            candlestick=True, show_signal=True):
+
+        df = self.daily if timeframe == '1d' else self.five_min
+
+        if start_date is not None:
+            df = df[df.index >= start_date]
+        if end_date is not None:
+            df = df[df.index <= end_date]
+
+        df.dropna(inplace=True)
+
+        fig = make_subplots(rows=2, cols=1, 
+                        shared_xaxes=True, 
+                        vertical_spacing=0.03, 
+                        row_heights=[0.7, 0.3],
+                        specs=[[{"secondary_y": True}],
+                        [{"secondary_y": False}]])
+
+        if candlestick:
+            price = go.Candlestick(
+                        x=df.index,
+                        open=df['open'],
+                        high=df['high'],
+                        low=df['low'],
+                        close=df['close'],
+                        name=f'{self.asset.ticker} OHLC',
+            )
+        else:
+            price = go.Scatter(
+                        x=df.index,
+                        y=df['close'],
+                        line=dict(
+                            color='#2962FF',
+                            width=2,
+                            dash='solid'
+                        ),
+                        name=f'{self.asset.ticker} Price',
+            )
+
+        MACD = go.Scatter(
+                x=df.index,
+                y=df['macd'],
+                line=dict(color='red', width=1.5),
+                name='MACD'
+        )
+
+        signal_line = go.Scatter(
+                x=df.index,
+                y=df['signal_line'],
+                line=dict(color='blue', width=1.5),
+                name='Signal Line'
+        )
+
+        macd_hist = go.Bar(
+                x=df.index,
+                y=df['macd_hist'],
+                marker_color='black',
+                name='MACD Histogram'
+        )
+
+        if show_signal:
+            signal = go.Scatter(
+                        x=df.index,
+                        y=df['signal'],
+                        line=dict(color='green', width=0.8, dash='solid'),
+                        name='Buy/Sell signal',
+                        yaxis='y2'
+            )
+
+        fig.add_trace(price)
+
+        fig.add_trace(MACD, row=2, col=1)
+        fig.add_trace(signal_line, row=2, col=1)
+        fig.add_trace(macd_hist, row=2, col=1)
+
+
+
+        if show_signal:
+            fig.add_trace(signal)
+
+        layout = {}
+
+        layout['title'] = dict(
+                text=f'{self.asset.ticker} MACD Strategy ({self.params})',
+                x=0.5,
+                y=0.95
+            )
+
+        layout['xaxis'] = dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(128,128,128,0.2)',
+                title=None,
+            )
+
+        layout['yaxis'] = dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(128,128,128,0.2)',
+                title=f'Price ({self.asset.currency})',
+            )
+
+        layout[f'xaxis1_rangeslider_visible'] = False
+
+        layout['height'] = 800
+
+        if show_signal:
+            layout['yaxis2'] = dict(
+                    title='Signal',
+                    overlaying='y',
+                    side='right',
+                    range=[-1.1, 1.1],  # Give some padding to the 0/1 signal
+                    tickmode='array',
+                    tickvals=[-1, 1],
+                    ticktext=['Sell', 'Buy']
+                )
+
+        layout['yaxis3'] = dict(
+                title='MACD',
+                side='right'
+            )
+
+        layout['legend'] = dict(
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+                orientation="h",  # horizontal layout
+                bgcolor='rgba(255,255,255,0.8)'
+            )
+
+        fig.update_layout(**layout,
+                            paper_bgcolor='white',
+                            plot_bgcolor='rgba(240,240,240,0.95)',
+                            hovermode='x unified')
+
+        fig.show()
+
+        return fig
 
     def optimize(self):
         pass

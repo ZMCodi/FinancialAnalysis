@@ -695,19 +695,29 @@ class RSI(Strategy):
 
 class MACD(Strategy):
 
-    def __init__(self, asset, fast=12, slow=26, signal=9, signal_type=None, combine=None):
+    def __init__(self, asset, fast=12, slow=26, signal=9, signal_type=None, combine=None, weights=None, threshold=0.5):
         super().__init__(asset)
         self.__slow = slow
         self.__fast = fast
         self.__signal = signal
+
         if signal_type is not None:
             self.signal_type = list(signal_type)
         else:
             self.signal_type = ['crossover', 'divergence', 'hidden divergence', 'momentum', 'double peak/trough']
+
         if combine is not None:
             self.__combine = str(combine)
         else:
-            self.__combine = 'voting'
+            self.__combine = 'majority'
+
+        if weights is not None:
+            self.__weights = weights
+        else:
+            self.__weights = [1 / len(self.signal_type)] * len(self.signal_type)
+
+        self.__threshold = threshold
+
         self.engine = TAEngine()
         self.__get_data()
 
@@ -729,7 +739,16 @@ class MACD(Strategy):
             else:
                 self.five_min = df
 
-            df['signal'] = sg.macd()
+            df['signal'] = sg.macd(df['macd'], df['log_rets'], self.signal_type, 
+                                   self.combine, self.threshold, self.weights)
+
+            df.rename(columns=dict(log_rets='returns'), inplace=True)
+            df['strategy'] = df['returns'] * df['signal']
+
+            if i == 0:
+                self.daily = df
+            else:
+                self.five_min = df
     
     @property
     def fast(self):
@@ -765,6 +784,24 @@ class MACD(Strategy):
     @combine.setter
     def combine(self, value):
         self.__combine = value
+        self.__get_data()
+
+    @property
+    def weights(self):
+        return self.__weights
+
+    @weights.setter
+    def weights(self, value):
+        self.__weights = value
+        self.__get_data()
+
+    @property
+    def threshold(self):
+        return self.__threshold
+
+    @threshold.setter
+    def threshold(self, value):
+        self.__threshold = value
         self.__get_data()
 
     def plot(self):

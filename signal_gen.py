@@ -35,7 +35,7 @@ def rsi(RSI, ub, lb, exit, m_rev_bound=None):
     return signal
 
 
-def macd(macd_hist, rets, signal_type, combine):
+def macd(macd_hist, rets, signal_type, combine, threshold, weights=None):
     signals = pd.DataFrame(index=macd_hist.index)
 
     if 'crossover' in signal_type:
@@ -53,7 +53,16 @@ def macd(macd_hist, rets, signal_type, combine):
     if 'double peak/trough' in signal_type:
         signals['double'] = macd_double(macd_hist)
 
-    return signals
+    # combine methods: unanimous, majority, weighted
+    if combine == 'unanimous':
+        threshold = 1
+        weights = [1 / len(signals.columns)] * len(signals.columns)
+    elif combine == 'majority':
+        weights = [1 / len(signals.columns)] * len(signals.columns)
+
+    signal = vote(signals, threshold, weights)
+
+    return signal
 
 
 def macd_divergence(macd_hist, rets, hidden=False):
@@ -182,7 +191,7 @@ def find_double_patterns(macd_hist, distance_min=7, distance_max=25, prominence=
 
     return double_tops, double_bottoms
 
-# Create signals
+
 def double_pattern_signals(df, double_tops, double_bottoms):
     signal = pd.Series(np.nan, index=df.index)
 
@@ -195,6 +204,21 @@ def double_pattern_signals(df, double_tops, double_bottoms):
 
     if np.isnan(signal.iloc[0]):
         signal.iloc[0] = 1
+    signal = signal.ffill().astype(int)
+
+    return signal
+
+
+def vote(signals, threshold, weights):
+    weights = np.array(weights)
+
+    combined = signals.dot(weights)
+
+    signal = pd.DataFrame(np.where(combined > threshold, 1, 
+                    np.where(combined < -threshold, -1, np.nan)), index=signals.index)
+
+    if np.isnan(signal.iloc[0, 0]):
+        signal.iloc[0, 0] = 1
     signal = signal.ffill().astype(int)
 
     return signal

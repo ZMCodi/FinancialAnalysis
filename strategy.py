@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
+import signal_gen as sg
 
 class TAEngine:
 
@@ -52,42 +53,6 @@ class TAEngine:
             self.cache[key] = results
 
         return self.cache[key]
-
-
-class SignalGenerator:
-
-    @staticmethod
-    def ma_crossover(short, long):
-        return np.where(short > long, 1, -1)
-
-    @staticmethod
-    def rsi(RSI, ub, lb, exit, m_rev_bound=None):
-        if exit == 're':
-            signal = np.where(
-                (RSI.shift(1) > ub) & (RSI < ub), -1, 
-                np.where((RSI.shift(1) < lb) & (RSI > lb), 1, np.nan)
-            )
-            short_entries = (RSI.shift(1) > ub) & (RSI < ub)
-        else:
-            signal = np.where(
-                RSI > ub, -1,
-                np.where(RSI < lb, 1, np.nan)
-            )
-            short_entries = (RSI.shift(1) <= ub) & (RSI > ub)
-
-        signal = pd.Series(signal, index=RSI.index)
-
-        if np.isnan(signal.iloc[0]):
-            signal.iloc[0] = 1
-        signal = signal.ffill().astype(int)
-
-        if m_rev_bound is not None:
-            mean_rev_points = (RSI <= m_rev_bound) & (signal == -1)
-            groups = short_entries.cumsum()
-            mean_rev_triggered = mean_rev_points.groupby(groups).cummax()
-            signal = np.where(mean_rev_triggered, 1, signal)
-
-        return signal
 
 
 class Strategy(ABC):
@@ -249,7 +214,6 @@ class MA_Crossover(Strategy):
         self.__short = eval(f'short_{param_type}')
         self.__long = eval(f'long_{param_type}')
         self.engine = TAEngine()
-        self.signal_gen = SignalGenerator()
         self.__get_data()
 
     def __str__(self):
@@ -269,7 +233,7 @@ class MA_Crossover(Strategy):
             df['long'] = self.engine.calculate_ma(data, self.ewm, ptype, self.long, name)
             df.dropna(inplace=True)
 
-            df['signal'] = self.signal_gen.ma_crossover(df['short'], df['long'])
+            df['signal'] = sg.ma_crossover(df['short'], df['long'])
             df.rename(columns=dict(log_rets='returns'), inplace=True)
             df['strategy'] = df['returns'] * df['signal']
             if i == 0:
@@ -482,7 +446,6 @@ class RSI(Strategy):
         self.m_rev = m_rev
         self.__m_rev_bound = m_rev_bound
         self.engine = TAEngine()
-        self.signal_gen = SignalGenerator()
         self.__get_data()
 
     def __str__(self):
@@ -501,7 +464,7 @@ class RSI(Strategy):
             df['rsi'] = self.engine.calculate_rsi(data, self.window, name)
             df.dropna(inplace=True)
 
-            df['signal'] = self.signal_gen.rsi(df['rsi'], self.ub, self.lb, self.exit, 
+            df['signal'] = sg.rsi(df['rsi'], self.ub, self.lb, self.exit, 
                             self.m_rev_bound if self.m_rev else None)
 
             df.rename(columns=dict(log_rets='returns'), inplace=True)

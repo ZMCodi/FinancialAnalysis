@@ -55,11 +55,40 @@ class TAEngine:
 
 
 class SignalGenerator:
-    def __init__(self):
-        self.cache = {}
 
-    def ma_crossover(self, short, long):
+    @staticmethod
+    def ma_crossover(short, long):
         return np.where(short > long, 1, -1)
+
+    @staticmethod
+    def rsi(RSI, ub, lb, exit, m_rev_bound=None):
+        if exit == 're':
+            signal = np.where(
+                (RSI.shift(1) > ub) & (RSI < ub), -1, 
+                np.where((RSI.shift(1) < lb) & (RSI > lb), 1, np.nan)
+            )
+            short_entries = (RSI.shift(1) > ub) & (RSI < ub)
+        else:
+            signal = np.where(
+                RSI > ub, -1,
+                np.where(RSI < lb, 1, np.nan)
+            )
+            short_entries = (RSI.shift(1) <= ub) & (RSI > ub)
+
+        signal = pd.Series(signal, index=RSI.index)
+
+        if np.isnan(signal.iloc[0]):
+            signal.iloc[0] = 1
+        signal = signal.ffill().astype(int)
+
+        if m_rev_bound is not None:
+            mean_rev_points = (RSI <= m_rev_bound) & (signal == -1)
+            groups = short_entries.cumsum()
+            mean_rev_triggered = mean_rev_points.groupby(groups).cummax()
+            signal = np.where(mean_rev_triggered, 1, signal)
+
+        return signal
+
 
 class Strategy(ABC):
 
@@ -453,6 +482,7 @@ class RSI(Strategy):
         self.m_rev = m_rev
         self.__m_rev_bound = m_rev_bound
         self.engine = TAEngine()
+        self.signal_gen = SignalGenerator()
         self.__get_data()
 
     def __str__(self):
@@ -471,32 +501,8 @@ class RSI(Strategy):
             df['rsi'] = self.engine.calculate_rsi(data, self.window, name)
             df.dropna(inplace=True)
 
-            if self.exit == 're':
-                df['signal'] = np.where(
-                    np.logical_and(df['rsi'].shift(1) > self.ub, df['rsi'] < self.ub), -1,
-                    np.where(np.logical_and(df['rsi'].shift(1) < self.lb, df['rsi'] > self.lb), 1, np.nan)
-                )
-            else:
-                df['signal'] = np.where(
-                    df['rsi'] > self.ub, -1,
-                    np.where(df['rsi'] < self.lb, 1, np.nan)
-                )
-
-            if np.isnan(df['signal'].iloc[0]):
-                idx = df.index[0]
-                df.loc[idx, 'signal'] = 1
-            df['signal'] = df['signal'].ffill().astype(int)
-
-            if self.m_rev:
-                if self.exit == 're':
-                    short_entries = np.logical_and(df['rsi'].shift(1) > self.ub, df['rsi'] < self.ub)
-                else:
-                    short_entries = np.logical_and(df['rsi'].shift(1) <= self.ub, df['rsi'] > self.ub)
-
-                mean_rev_points = np.logical_and(df['rsi'] <= self.m_rev_bound, df['signal'] == -1)
-                groups = short_entries.cumsum()
-                mean_rev_triggered = mean_rev_points.groupby(groups).cummax()
-                df['signal'] = np.where(mean_rev_triggered, 1, df['signal'])
+            df['signal'] = self.signal_gen.rsi(df['rsi'], self.ub, self.lb, self.exit, 
+                            self.m_rev_bound if self.m_rev else None)
 
             df.rename(columns=dict(log_rets='returns'), inplace=True)
             df['strategy'] = df['returns'] * df['signal']

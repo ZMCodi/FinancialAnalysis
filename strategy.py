@@ -259,10 +259,10 @@ class MA_Crossover(Strategy):
         self.__long = value
         self.__get_data()
 
-    def change_params(self, param_type, short, long, ewm=None):
-        self.ptype = param_type
-        self.__short = short
-        self.__long = long
+    def change_params(self, param_type=None, short=None, long=None, ewm=None):
+        self.ptype = param_type if param_type is not None else self.ptype
+        self.__short = short if short is not None else self.short
+        self.__long = long if long is not None else self.long
         self.ewm = ewm if ewm is not None else self.ewm
         self.__get_data()
 
@@ -392,7 +392,7 @@ class MA_Crossover(Strategy):
             if self.ptype == 'window':
                 short_range = np.arange(20, 61, 5)  # window
             else:
-                short_range = np.arange(0.05, 0.31, 0.05)  # alpha
+                short_range = np.arange(0.10, 0.31, 0.03)  # alpha
                 if self.ptype == 'halflife':
                     short_range = -np.log(2) / np.log(1 - short_range)  # halflife
 
@@ -408,7 +408,12 @@ class MA_Crossover(Strategy):
 
         results = []
         for short, long in product(short_range, long_range):
-            self.change_params(self.ptype, short, long)
+            if self.ptype == 'alpha' and short <= long:
+                continue
+            elif short >= long:
+                continue
+
+            self.change_params(short=short, long=long)
             backtest_results = self.backtest(plot=False, 
                                         timeframe=timeframe, 
                                         start_date=start_date,
@@ -427,7 +432,7 @@ class MA_Crossover(Strategy):
             opt_long = int(opt_long)
 
         if inplace:
-            self.change_params(self.ptype, opt_short, opt_long)
+            self.change_params(short=opt_short, long=opt_long)
         else:
             self.change_params(**old_params)
 
@@ -683,11 +688,14 @@ class RSI(Strategy):
             params.append([self.m_rev_bound])
 
         old_params = {'ub': self.ub, 'lb': self.lb, 'window': self.window,
-                    'exit': self.exit, 'm_rev': self.m_rev, 'm_rev_bound': self.m_rev_bound}
+                      'm_rev_bound': self.m_rev_bound}
 
         results = []
         for ub, lb, window, m_rev_bound in product(*params):
-            self.change_params(ub, lb, window, m_rev_bound=m_rev_bound)
+            if ub <= lb or m_rev_bound >= ub or m_rev_bound <= lb:
+                continue
+
+            self.change_params(ub=ub, lb=lb, window=window, m_rev_bound=m_rev_bound)
             backtest_results = self.backtest(plot=False, 
                                         timeframe=timeframe, 
                                         start_date=start_date,
@@ -704,7 +712,7 @@ class RSI(Strategy):
         opt_m_rev_bound = results.iloc[0]['m_rev_bound']
 
         if inplace:
-            self.change_params(opt_ub, opt_lb, opt_window, m_rev_bound=opt_m_rev_bound)
+            self.change_params(ub=opt_ub, lb=opt_lb, window=opt_window, m_rev_bound=opt_m_rev_bound)
         else:
             self.change_params(**old_params)
 
@@ -713,7 +721,7 @@ class RSI(Strategy):
 
 class MACD(Strategy):
 
-    def __init__(self, asset, fast=12, slow=26, signal=9, signal_type=None, combine=None, weights=None, threshold=0.5):
+    def __init__(self, asset, fast=12, slow=26, signal=9, signal_type=None, combine='majority', weights=None, threshold=0.5):
         super().__init__(asset)
         self.__slow = slow
         self.__fast = fast
@@ -724,10 +732,7 @@ class MACD(Strategy):
         else:
             self.signal_type = ['crossover', 'divergence', 'hidden divergence', 'momentum', 'double peak/trough']
 
-        if combine is not None:
-            self.__combine = str(combine)
-        else:
-            self.__combine = 'majority'
+        self.__combine = str(combine)
 
         if weights is not None:
             self.__weights = np.array(weights)
@@ -968,8 +973,48 @@ class MACD(Strategy):
 
         return fig
 
-    def optimize(self):
-        pass
+    def optimize(self, inplace=False, which='indicator', timeframe='1d', start_date=None, end_date=None,
+                 slow_range=None, fast_range=None, signal_range=None, threshold_range=None):
+        if which == 'signals':
+            return self.optimize_weights(inplace=inplace, timeframe=timeframe, start_date=start_date,
+                                  end_date=end_date, threshold_range=threshold_range)
+        
+        if fast_range is None:
+            fast_range = np.arange(8, 21, 2)
+        if slow_range is None:
+            slow_range = np.arange(21, 35, 2)
+        if signal_range is None:
+            signal_range = np.arange(5, 15, 2)
+
+        old_params = {'fast': self.fast, 'slow': self.slow, 'signal': self.signal}
+
+        results = []
+        for fast, slow, signal in product(fast_range, slow_range, signal_range):
+            if fast >= slow:
+                continue
+
+            self.change_params(fast=fast, slow=slow, signal=signal)
+            backtest_results = self.backtest(plot=False, 
+                             timeframe=timeframe, 
+                             start_date=start_date,
+                             end_date=end_date)
+            results.append((fast, slow, signal, backtest_results['returns'], backtest_results['strategy']))
+
+        results = pd.DataFrame(results, columns=['fast', 'slow', 'signal', 'hold_returns', 'strategy_returns'])
+        results['net'] = results['strategy_returns'] - results['hold_returns']
+        results = results.sort_values(by='net', ascending=False)
+
+        opt_fast = results.iloc[0]['fast']
+        opt_slow = results.iloc[0]['slow']
+        opt_signal = results.iloc[0]['signal']
+
+        if inplace:
+            self.change_params(fast=opt_fast, slow=opt_slow, signal=opt_signal)
+        else:
+            self.change_params(**old_params)
+
+        return results
+
 
 
 

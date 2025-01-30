@@ -518,10 +518,54 @@ class Strategy(ABC):
 
 
 class MA_Crossover(Strategy):
+    """Moving Average Crossover trading strategy implementation.
+    
+    Implements a strategy based on crossovers between a short-term and long-term
+    moving average. Generates buy signals when the short-term MA crosses above
+    the long-term MA, and sell signals for crossovers in the opposite direction.
 
-    def __init__(self, asset, param_type='window', short_window=20, long_window=50,
-                short_alpha=None, long_alpha=None, short_halflife=None, long_halflife=None, ewm=False):
+    Supports both simple and exponential moving averages with flexible parameter
+    types including window periods, spans, half-lives, and alpha values.
 
+    Attributes:
+        asset (Asset): Asset to apply the strategy to
+        ptype (str): Parameter type for moving averages ('window', 'alpha', or 'halflife')
+        ewm (bool): Whether to use exponential weighted averages
+        short (float): Short-term moving average parameter
+        long (float): Long-term moving average parameter
+        engine (TAEngine): Technical analysis calculation engine
+        params (str): String representation of strategy parameters (short/long)
+        daily (pd.DataFrame): Daily data with signals and strategy returns
+        five_min (pd.DataFrame): 5-minute data with signals and strategy returns
+    """
+
+    def __init__(self, asset: Asset, param_type: str = 'window', 
+                short_window: int = 20, long_window: int = 50,
+                short_alpha: Optional[float] = None, 
+                long_alpha: Optional[float] = None,
+                short_halflife: Optional[float] = None, 
+                long_halflife: Optional[float] = None, 
+                ewm: bool = False):
+        """Initialize the Moving Average Crossover strategy.
+
+        Args:
+            asset (Asset): Asset to apply the strategy to
+            param_type (str, optional): Type of parameter to use ('window', 'alpha', or 'halflife').
+                Defaults to 'window'.
+            short_window (int, optional): Short MA window period. Defaults to 20.
+            long_window (int, optional): Long MA window period. Defaults to 50.
+            short_alpha (float, optional): Short MA alpha value. Defaults to None.
+            long_alpha (float, optional): Long MA alpha value. Defaults to None.
+            short_halflife (float, optional): Short MA half-life. Defaults to None.
+            long_halflife (float, optional): Long MA half-life. Defaults to None.
+            ewm (bool, optional): Whether to use exponential weighted MA. Defaults to False.
+
+        Notes:
+            Only one set of parameters should be provided based on param_type:
+            - For param_type='window': use short_window and long_window
+            - For param_type='alpha': use short_alpha and long_alpha
+            - For param_type='halflife': use short_halflife and long_halflife
+        """
         super().__init__(asset)
         self.ptype = param_type
         self.ewm = ewm
@@ -530,10 +574,22 @@ class MA_Crossover(Strategy):
         self.engine = TAEngine()
         self.__get_data()
 
-    def __str__(self):
+    def __str__(self) -> str:
+        """String representation of the strategy.
+
+        Returns:
+            str: Strategy description with parameters
+        """
         return f'MA_Crossover({self.asset.ticker}, short_{self.ptype}={self.short}, long_{self.ptype}={self.long})'
 
-    def __get_data(self):
+    def __get_data(self) -> None:
+        """Calculate moving averages and generate trading signals.
+        
+        Updates both daily and 5-minute dataframes with:
+        - Short and long moving averages
+        - Trading signals (-1 for sell, 1 for buy)
+        - Strategy returns (signal * returns)
+        """
         self.daily = pd.DataFrame(self.asset.daily[['adj_close', 'log_rets']])
         self.five_min = pd.DataFrame(self.asset.five_minute[['adj_close', 'log_rets']])
         self.params = f'({self.short}/{self.long})'
@@ -556,33 +612,76 @@ class MA_Crossover(Strategy):
                 self.five_min = df
 
     @property
-    def short(self):
+    def short(self) -> float:
+        """Short-term moving average parameter.
+
+        Returns:
+            float: Parameter value for short-term MA
+        """
         return self.__short
 
     @short.setter
-    def short(self, value):
+    def short(self, value: float) -> None:
+        """Set short-term moving average parameter.
+
+        Args:
+            value (float): New parameter value for short-term MA
+        """
         self.__short = value
         self.__get_data()
 
     @property
-    def long(self):
+    def long(self) -> float:
+        """Long-term moving average parameter.
+
+        Returns:
+            float: Parameter value for long-term MA
+        """
         return self.__long
 
     @long.setter
-    def long(self, value):
+    def long(self, value: float) -> None:
+        """Set long-term moving average parameter.
+
+        Args:
+            value (float): New parameter value for long-term MA
+        """
         self.__long = value
         self.__get_data()
 
-    def change_params(self, param_type=None, short=None, long=None, ewm=None):
+    def change_params(self, param_type: Optional[str] = None, 
+                     short: Optional[float] = None, 
+                     long: Optional[float] = None,
+                     ewm: Optional[bool] = None) -> None:
+        """Update multiple strategy parameters at once.
+
+        Args:
+            param_type (str, optional): New parameter type. Defaults to None.
+            short (float, optional): New short MA parameter. Defaults to None.
+            long (float, optional): New long MA parameter. Defaults to None.
+            ewm (bool, optional): Whether to use EMA. Defaults to None.
+        """
         self.ptype = param_type if param_type is not None else self.ptype
         self.__short = short if short is not None else self.short
         self.__long = long if long is not None else self.long
         self.ewm = ewm if ewm is not None else self.ewm
         self.__get_data()
 
-    def plot(self, timeframe='1d', start_date=None, end_date=None, 
-            show_signal=True):
+    def plot(self, timeframe: str = '1d', 
+            start_date: Optional[DateLike] = None,
+            end_date: Optional[DateLike] = None, 
+            show_signal: bool = True) -> go.Figure:
+        """Create interactive plot of moving averages and signals.
 
+        Args:
+            timeframe (str, optional): Data frequency to plot ('1d' or '5m'). Defaults to '1d'.
+            start_date (DateLike, optional): Start date to plot from. Defaults to None.
+            end_date (DateLike, optional): End date to plot to. Defaults to None.
+            show_signal (bool, optional): Whether to show trading signals. Defaults to True.
+
+        Returns:
+            go.Figure: Plotly figure with moving averages and optional signals
+        """
         df = self.daily if timeframe == '1d' else self.five_min
 
         if start_date is not None:
@@ -699,9 +798,34 @@ class MA_Crossover(Strategy):
 
         return fig
 
-    def optimize(self, inplace=False, timeframe='1d', start_date=None, end_date=None,
-                 short_range=None, long_range=None):
+    def optimize(self, inplace: bool = False, timeframe: str = '1d',
+                start_date: Optional[DateLike] = None, 
+                end_date: Optional[DateLike] = None,
+                short_range: Optional[np.ndarray] = None,
+                long_range: Optional[np.ndarray] = None) -> pd.DataFrame:
+        """Optimize moving average parameters through grid search.
 
+        Tests combinations of short and long parameters to find the best performing
+        settings based on strategy returns vs buy-and-hold returns.
+
+        Args:
+            inplace (bool, optional): Whether to update strategy parameters. Defaults to False.
+            timeframe (str, optional): Data frequency to use ('1d' or '5m'). Defaults to '1d'.
+            start_date (DateLike, optional): Start date for optimization. Defaults to None.
+            end_date (DateLike, optional): End date for optimization. Defaults to None.
+            short_range (np.ndarray, optional): Range of short MA parameters to test.
+                Defaults to appropriate ranges based on param_type.
+            long_range (np.ndarray, optional): Range of long MA parameters to test.
+                Defaults to appropriate ranges based on param_type.
+
+        Returns:
+            pd.DataFrame: Results sorted by net returns (strategy - hold), containing:
+                - short: Short MA parameter
+                - long: Long MA parameter
+                - hold_returns: Buy-and-hold returns
+                - strategy_returns: Strategy returns
+                - net: Net returns (strategy - hold)
+        """
         if short_range is None:
             if self.ptype == 'window':
                 short_range = np.arange(20, 61, 5)  # window
@@ -751,8 +875,13 @@ class MA_Crossover(Strategy):
             self.change_params(**old_params)
 
         return results
-    
+
     def optimize_weights(self):
+        """Not implemented for MA Crossover strategy.
+
+        Raises:
+            NotImplementedError: MA Crossover uses single signal, no weights to optimize
+        """
         raise NotImplementedError("No weights associated with this strategy")
 
 

@@ -33,17 +33,17 @@ def rsi(RSI, ub, lb, exit, m_rev_bound=None):
     return signal
 
 
-def macd(macd_hist, rets, signal_type, combine, threshold, weights=None):
+def macd(macd_hist, macd, price, signal_type, combine, threshold, weights=None):
     signals = pd.DataFrame(index=macd_hist.index)
 
     if 'crossover' in signal_type:
         signals['crossover'] = np.where(macd_hist > 0, 1, -1)
 
     if 'divergence' in signal_type:
-        signals['divergence'] = macd_divergence(macd_hist, rets, False)
+        signals['divergence'] = macd_divergence(macd_hist, price, False)
 
     if 'hidden divergence' in signal_type:
-        signals['hidden_div'] = macd_divergence(macd_hist, rets, True)
+        signals['hidden_div'] = macd_divergence(macd_hist, price, True)
 
     if 'momentum' in signal_type:
         signals['momentum'] = macd_momentum(macd_hist)
@@ -63,28 +63,8 @@ def macd(macd_hist, rets, signal_type, combine, threshold, weights=None):
     return signal
 
 
-def macd_divergence(macd_hist, rets, hidden=False):
-
-    price_const_1 = (rets < 0)
-    price_const_2 = (rets > 0)
-
-    if hidden:
-        price_const_1, price_const_2 = price_const_2, price_const_1
-
-    signal = np.where(
-        price_const_1
-        & (macd_hist.shift(1) < macd_hist)
-        & (macd_hist < 0), 1,
-            np.where(
-                price_const_2
-                & (macd_hist.shift(1) > macd_hist)
-                & (macd_hist.shift(1) > 0), -1, np.nan
-            )
-    )
-
-    signal = pd.Series(signal, index=macd_hist.index)
-
-    return fill(signal)
+def macd_divergence(macd, price, hidden=False):
+    return divergence_signals(macd, *find_momentum_divergence(price, macd, hidden=hidden))
 
 def macd_momentum(macd_hist):
     signal = np.where(
@@ -175,7 +155,7 @@ def bb_walks(price, bb_up, bb_down, prox=0.2, periods=5):
 def bb_squeeze(price, bb_up, bb_down, aggressive=False):
     width = bb_up - bb_down
     squeeze = width < width.rolling(20).quantile(0.2)
-    
+
     if aggressive:
         ext = (width > width.shift(1)) & squeeze.shift(1)
     else:
@@ -207,6 +187,86 @@ def bb_pctB(price, bb_up, bb_down, overbought=0.8, oversold=0.2):
                       np.where(pctB < oversold, 1, np.nan)), index=price.index)
 
     return fill(signal)
+
+
+def find_momentum_divergence(price, indicator, distance_min=7, distance_max=25, prominence=0.05, hidden=False, is_rsi=False, ub=0.7, lb=0.3):
+    """
+    Find regular or hidden divergences using peak detection
+    Works with both MACD and RSI
+    """
+    price_peaks, _ = find_peaks(price, distance=distance_min,
+                               prominence=prominence*(price.max() - price.min()))
+    price_troughs, _ = find_peaks(-price, distance=distance_min,
+                                 prominence=prominence*(price.max() - price.min()))
+    
+    ind_peaks, _ = find_peaks(indicator, distance=distance_min,
+                             prominence=prominence*(indicator.max() - indicator.min()))
+    ind_troughs, _ = find_peaks(-indicator, distance=distance_min,
+                               prominence=prominence*(indicator.max() - indicator.min()))
+
+    bearish_divs = []
+    for i in range(len(price_peaks)-1):
+        peak1_idx = price_peaks[i]
+        peak2_idx = price_peaks[i+1]
+
+        if peak2_idx - peak1_idx > distance_max:
+            continue
+
+        # Regular: price higher high + indicator lower high
+        # Hidden: price lower high + indicator higher high
+        if (not hidden and price.iloc[peak2_idx] > price.iloc[peak1_idx]) or \
+           (hidden and price.iloc[peak2_idx] < price.iloc[peak1_idx]):
+
+            ind_peak1 = ind_peaks[(ind_peaks >= peak1_idx - distance_min) & 
+                                (ind_peaks <= peak1_idx + distance_min)]
+            ind_peak2 = ind_peaks[(ind_peaks >= peak2_idx - distance_min) & 
+                                (ind_peaks <= peak2_idx + distance_min)]
+
+            if len(ind_peak1) > 0 and len(ind_peak2) > 0:
+                if (not hidden and indicator.iloc[ind_peak2[0]] < indicator.iloc[ind_peak1[0]]) or \
+                   (hidden and indicator.iloc[ind_peak2[0]] > indicator.iloc[ind_peak1[0]]):
+                    # For RSI bearish, more significant if peaks are in overbought territory
+                    if not is_rsi or indicator.iloc[ind_peak1[0]] > ub:
+                        bearish_divs.append((int(peak2_idx), int(ind_peak2[0])))
+
+    bullish_divs = []
+    for i in range(len(price_troughs)-1):
+        trough1_idx = price_troughs[i]
+        trough2_idx = price_troughs[i+1]
+
+        if trough2_idx - trough1_idx > distance_max:
+            continue
+
+        # Regular: price lower low + indicator higher low
+        # Hidden: price higher low + indicator lower low
+        if (not hidden and price.iloc[trough2_idx] < price.iloc[trough1_idx]) or \
+           (hidden and price.iloc[trough2_idx] > price.iloc[trough1_idx]):
+
+            ind_trough1 = ind_troughs[(ind_troughs >= trough1_idx - distance_min) & 
+                                    (ind_troughs <= trough1_idx + distance_min)]
+            ind_trough2 = ind_troughs[(ind_troughs >= trough2_idx - distance_min) & 
+                                    (ind_troughs <= trough2_idx + distance_min)]
+
+            if len(ind_trough1) > 0 and len(ind_trough2) > 0:
+                if (not hidden and indicator.iloc[ind_trough2[0]] > indicator.iloc[ind_trough1[0]]) or \
+                   (hidden and indicator.iloc[ind_trough2[0]] < indicator.iloc[ind_trough1[0]]):
+                    # For RSI bullish, more significant if troughs are in oversold territory
+                    if not is_rsi or indicator.iloc[ind_trough1[0]] < lb:
+                        bullish_divs.append((int(trough2_idx), int(ind_trough2[0])))
+
+    return bearish_divs, bullish_divs
+
+
+def divergence_signals(df, bearish_divs, bullish_divs):
+   signal = pd.Series(np.nan, index=df.index)
+
+   for price_idx, _ in bearish_divs:
+       signal.iloc[price_idx] = -1
+
+   for price_idx, _ in bullish_divs:
+       signal.iloc[price_idx] = 1
+
+   return fill(signal)
 
 
 def find_double_patterns(hist, distance_min=7, distance_max=25, prominence=0.05):

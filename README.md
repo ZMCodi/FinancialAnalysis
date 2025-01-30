@@ -1,6 +1,6 @@
-# Financial Analysis Library
+# Financial Analysis and Trading Strategy Library
 
-A Python library for financial data analysis and visualization. The library integrates with a PostgreSQL database for data storage while automatically handling missing data through the yfinance API. Designed for both quick analysis and integration into larger projects.
+A Python library for financial data analysis and trading strategy implementation. The library integrates with a PostgreSQL database for data storage while automatically handling missing data through the yfinance API. It provides both analytical tools and a comprehensive framework for developing, testing, and optimizing trading strategies.
 
 ## Features
 
@@ -13,18 +13,28 @@ A Python library for financial data analysis and visualization. The library inte
   - Price history plots
   - Candlestick charts with volume
   - Returns distribution analysis
-  - Technical indicators (SMA, Bollinger Bands)
+  - Technical indicators with signals
+  - Strategy performance visualization
+
+- **Technical Analysis and Trading Strategies**
+  - Moving Average Crossover
+  - RSI with multiple signal types
+  - MACD with momentum and divergence signals
+  - Bollinger Bands with squeeze and breakout detection
+  - Strategy combination and signal weighting
+
+- **Trading Framework**
+  - Strategy backtesting with daily and 5-minute data
+  - Parameter optimization through grid search
+  - Signal generation and combination methods
+  - Weight optimization for combined strategies
+  - Performance analysis and visualization
 
 - **Flexible Plot Creation**
   - Both static (matplotlib) and interactive (plotly) visualizations
   - Support for standalone plots and subplots
   - Customizable formatting through returned figure objects
-
-- **Technical Analysis Tools**
-  - Simple Moving Averages (SMA)
-  - Exponential Moving Averages (EMA)
-  - Bollinger Bands
-  - SMA Crossover strategy
+  - Strategy-specific visualization methods
 
 ## Installation
 
@@ -46,77 +56,101 @@ conda activate [environment-name]
 
 ```python
 from assets import Asset
-import plotly.subplots import make_subplots
-import matplotlib.pyplot as plt
+from strategy import MA_Crossover, RSI, MACD, BB, CombinedStrategy
 
-# Initialize assets
-# Note: If these tickers aren't in the database, they will be automatically 
-# downloaded from yfinance and added to the database
+# Initialize asset
 aapl = Asset('AAPL')
-msft = Asset('MSFT')
-nvda = Asset('NVDA')
 
-# Interactive Plotting Example
-# Create subplots with different chart types
-fig1 = make_subplots(rows=3, cols=1)
-aapl.plot_price_history(interactive=True, fig=fig1, subplot_idx=(1, 1))
-msft.plot_candlestick(interactive=True, fig=fig1, vol_idx=(3, 1), candle_idx=(2, 1))
-fig1.show()
+# Basic Analysis
+aapl.plot_price_history(interactive=True)
+aapl.plot_candlestick(volume=True)
+aapl.plot_returns_dist(show_stats=True)
 
-# Create standalone interactive plot
-nvda.SMA_crossover(interactive=True, short=20, long=150)
+# Simple Moving Average Strategy
+ma_strat = MA_Crossover(aapl, short_window=20, long_window=50)
+ma_strat.plot()  # View strategy signals
+results = ma_strat.backtest()  # Run backtest
+ma_strat.optimize(inplace=True)  # Optimize parameters
 
-# Static Plotting Example
-# Create subplot figure with different analysis
-fig2, (ax1, ax2, ax3) = plt.subplots(3, 1)
-aapl.plot_price_history(fig=fig2, subplot_idx=0)
-nvda.plot_returns_dist(ax=ax2)
-msft.plot_candlestick(fig=fig2, volume=False, candle_idx=2)
-plt.show()
+# RSI Strategy with Multiple Signals
+rsi_strat = RSI(aapl, 
+                signal_type=['crossover', 'divergence', 'hidden divergence'],
+                combine='weighted')
+rsi_strat.plot(candlestick=True)
+rsi_strat.optimize_weights(inplace=True)  # Optimize signal weights
 
-# Create standalone static plot with technical indicators
-aapl.plot_SMA(alpha=0.3, bollinger_bands=True)
+# Combined Strategy Approach
+strategies = [
+    MA_Crossover(aapl, short_window=20, long_window=50),
+    RSI(aapl, ub=70, lb=30),
+    MACD(aapl),
+    BB(aapl)
+]
+combined = CombinedStrategy(aapl, strategies=strategies)
+combined.backtest()
+combined.optimize_weights(inplace=True)  # Optimize strategy weights
+
 ```
 
 ## API Overview
 
-### Data Management
+### Asset Management
 - `Asset(ticker)`: Initialize an asset and load its data
 - `get_data()`: Retrieve asset data from database
-- `insert_new_ticker()`: Add new asset to database
 - `resample(period)`: Resample data to different timeframes
 
-### Basic Analysis
-- `basic_stats()`: Get key statistics about the asset
-- `rolling_stats()`: Calculate rolling statistics
-- `add_bollinger_bands()`: Add Bollinger Bands to analysis
+### Analysis Tools
+- `stats`: Get key statistics and metrics
+- `rolling_stats()`: Calculate rolling window statistics
+- Technical indicators calculation through TAEngine class
+
+### Technical Analysis Strategies
+- `MA_Crossover`: Moving average crossover strategy
+  - Traditional crossover signals
+  - Parameter optimization
+  - Performance visualization
+
+- `RSI`: Relative Strength Index strategy
+  - Multiple signal types (crossover, divergence)
+  - Mean reversion capability
+  - Weight optimization
+
+- `MACD`: Moving Average Convergence Divergence
+  - Multiple signal types
+  - Momentum analysis
+  - Double peak/trough detection
+
+- `BB`: Bollinger Bands
+  - Multiple signal types (bounce, squeeze, breakout)
+  - Volatility-based signals
+  - Band walk detection
+
+- `CombinedStrategy`: Strategy integration
+  - Multiple strategy combination
+  - Weight optimization
+  - Consensus-based signals
+
+### Strategy Framework
+- `backtest()`: Run strategy backtest
+- `optimize()`: Grid search parameter optimization
+- `optimize_weights()`: Signal weight optimization
+- `plot()`: Strategy-specific visualization
+- Signal generation and combination utilities
 
 ### Visualization
-#### Price Charts
 - `plot_price_history()`: Plot price over time
-- `plot_candlestick()`: Create candlestick chart with optional volume
+- `plot_candlestick()`: Create candlestick chart with volume
 - `plot_returns_dist()`: Visualize returns distribution
-
-#### Technical Analysis
-- `plot_SMA()`: Plot Simple Moving Average with optional Bollinger Bands
-- `SMA_crossover()`: Plot SMA crossover signals
+- Strategy plotting methods with signals
 
 ### Common Parameters
-Most visualization methods support:
-- `interactive`: Toggle between static (matplotlib) and interactive (plotly) plots
-- `start_date`/`end_date`: Limit data range
+Most visualization and strategy methods support:
+- `interactive`: Toggle between static and interactive plots
 - `timeframe`: Choose between daily ('1d') and 5-minute data
-- `fig`/`subplot_idx`: Integration with existing figures for subplots
-- `filename`: Save plot to file
-
-## Future Development
-
-- Backtest implementation for SMA strategy
-- More statistical analysis metrics
-- SMA window optimization
-- Additional technical indicators and plot types
-- Default dashboard implementation
-- Portfolio class integration for multi-asset analysis
+- `start_date`/`end_date`: Limit data range
+- `fig`/`subplot_idx`: Integration with existing figures
+- `candlestick`: Toggle between line and candlestick charts
+- `show_signal`: Display trading signals
 
 ## Notes
 
@@ -124,3 +158,4 @@ Most visualization methods support:
 - Static plots use matplotlib/seaborn while interactive plots use plotly
 - Data is automatically managed through database integration with fallback to yfinance
 - Supports both daily and 5-minute data timeframes
+- Strategy optimization supports multiple approaches and objectives

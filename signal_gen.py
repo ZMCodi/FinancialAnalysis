@@ -52,6 +52,7 @@ Signal Combination Methods:
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
+from typing import Optional
 
 def ma_crossover(short: pd.Series, long: pd.Series) -> np.ndarray:
     """Generate trading signals from moving average crossovers.

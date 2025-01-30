@@ -55,6 +55,31 @@ class TAEngine:
 
         return self.cache[key]
 
+    def rolling_std(self, data, ewm, param_type, param, name):
+        key = f'rol_std_{param_type}={param}, {name=}'
+        if key not in self.cache:
+
+            if ewm:
+                self.cache[key] = data.ewm(**{f'{param_type}': param}).std()
+            else:
+                self.cache[key] = data.rolling(window=param).std()
+
+        return self.cache[key]
+
+    def calculate_bb(self, data, window, num_std, name):
+        key = f'bb_{window=}_{num_std=}, {name}'
+        if key not in self.cache:
+            results = pd.DataFrame(index=data.index)
+
+            results['sma'] = self.calculate_ma(data, False, 'window', window, name)
+            std = self.rolling_std(data, False, 'window', window, name)
+            results['bol_up'] = results['sma'] + num_std * std
+            results['bol_down'] = results['sma'] - num_std * std
+
+            self.cache[key] = results
+
+        return self.cache[key]
+
 
 class Strategy(ABC):
 
@@ -732,7 +757,7 @@ class RSI(Strategy):
 
 class MACD(Strategy):
 
-    def __init__(self, asset, fast=12, slow=26, signal=9, signal_type=None, combine='weighted', weights=None, threshold=0.5):
+    def __init__(self, asset, fast=12, slow=26, signal=9, signal_type=None, combine='weighted', weights=None, vote_threshold=0.5):
         super().__init__(asset)
         self.__slow = slow
         self.__fast = fast
@@ -751,7 +776,7 @@ class MACD(Strategy):
         else:
             self.__weights = np.array([1 / len(self.signal_type)] * len(self.signal_type))
 
-        self.__threshold = threshold
+        self.__vote_threshold = vote_threshold
 
         self.engine = TAEngine()
 
@@ -771,7 +796,7 @@ class MACD(Strategy):
             df.dropna(inplace=True)
 
             df['signal'] = sg.macd(df['macd'], df['log_rets'], self.signal_type, 
-                                   self.combine, self.threshold, self.weights)
+                                   self.combine, self.vote_threshold, self.weights)
 
             df.rename(columns=dict(log_rets='returns'), inplace=True)
             df['strategy'] = df['returns'] * df['signal']
@@ -828,22 +853,22 @@ class MACD(Strategy):
         self.__get_data()
 
     @property
-    def threshold(self):
-        return self.__threshold
+    def vote_threshold(self):
+        return self.__vote_threshold
 
-    @threshold.setter
-    def threshold(self, value):
-        self.__threshold = value
+    @vote_threshold.setter
+    def vote_threshold(self, value):
+        self.__vote_threshold = value
         self.__get_data()
 
-    def change_params(self, fast=None, slow=None, signal=None, combine=None, weights=None, threshold=None):
+    def change_params(self, fast=None, slow=None, signal=None, combine=None, weights=None, vote_threshold=None):
         self.__fast = fast if fast is not None else self.fast
         self.__slow = slow if slow is not None else self.slow
         self.__signal = signal if signal is not None else self.signal
         self.__combine = combine if combine is not None else self.combine
         self.__weights = np.array(weights) if weights is not None else self.weights
         self.__weights /= np.sum(self.__weights)
-        self.__threshold = threshold if threshold is not None else self.threshold
+        self.vote__threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
         self.__get_data()
 
     def plot(self, timeframe='1d', start_date=None, end_date=None,
@@ -1032,23 +1057,23 @@ class MACD(Strategy):
     def optimize_weights(self, inplace=False, timeframe='1d', start_date=None,
                             end_date=None, threshold_range=None, runs=10):
 
-        old_params = {'weights': self.weights, 'threshold': self.threshold}
+        old_params = {'weights': self.weights, 'vote_threshold': self.vote_threshold}
 
         def objective_function(params):
             weights = params[:-1]
             threshold = params[-1]
-            
+
             # Now evaluate combined signal with given weights
-            self.change_params(weights=weights, threshold=threshold)
+            self.change_params(weights=weights, vote_threshold=threshold)
             combined_returns = self.backtest(plot=False,
                                         timeframe=timeframe,
                                         start_date=start_date,
                                         end_date=end_date)['strategy']
-                                        
+
             # Add regularization terms to prevent extreme weights
             diversity_bonus = 0.1 * np.sum(-weights * np.log(weights + 1e-10))  # Entropy term
             extreme_penalty = 0.05 * np.sum(weights ** 2)  # L2 regularization
-            
+
             return -combined_returns - diversity_bonus + extreme_penalty
 
         n_weights = len(self.signal_type)
@@ -1067,17 +1092,17 @@ class MACD(Strategy):
         # Try multiple random initializations
         best_result = None
         best_value = float('inf')
-        
+
         for _ in range(runs):
             # Random initial weights that sum to 1
             init_weights = np.random.dirichlet(np.ones(n_weights))
             init_threshold = np.random.uniform(t_min, t_max)
             init_params = np.concatenate([init_weights, [init_threshold]])
-            
+
             result = sco.minimize(objective_function, init_params,
                                 method='SLSQP', bounds=bnds,
                                 constraints=cons)
-            
+
             if result.fun < best_value:
                 best_value = result.fun
                 best_result = result
@@ -1087,11 +1112,114 @@ class MACD(Strategy):
         opt_threshold = best_result.x[-1]
 
         if inplace:
-            self.change_params(weights=opt_weights, threshold=opt_threshold)
+            self.change_params(weights=opt_weights, vote_threshold=opt_threshold)
         else:
             self.change_params(**old_params)
 
         return opt_weights, opt_threshold
+
+
+class BB(Strategy):
+    
+    def __init__(self, asset, window=20, num_std=2, signal_type=None, combine='weighted', weights=None, vote_threshold=0.5):
+        super().__init__(asset)
+        self.__window = window
+        self.__num_std = num_std
+        
+        if signal_type is not None:
+            self.signal_type = list(signal_type)
+        else:
+            self.signal_type = ['bounce', 'double', 'walks', 'squeeze', 'breakout', '%B']
+
+        self.__combine = str(combine)
+
+        if weights is not None:
+            self.__weights = np.array(weights)
+            self.__weights /= np.sum(weights)
+        else:
+            self.__weights = np.array([1 / len(self.signal_type)] * len(self.signal_type))
+
+        self.__vote_threshold = vote_threshold
+        self.engine = TAEngine()
+        self.__get_data()
+
+    def __get_data(self):
+        self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
+        self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
+        self.params = f'window={self.window}(±{self.num_std})'
+
+        for i, df in enumerate([self.daily, self.five_min]):
+            data = df['adj_close']
+            name = 'daily' if i == 0 else 'five_min'
+            ptype = 'span' if self.ptype == 'window' and self.ewm else self.ptype
+
+            df[['sma', 'bol_up', 'bol_down']] = self.engine.calculate_bb(data, self.window, self.num_std, name)
+            df.dropna(inplace=True)
+
+            df['signal'] = sg.bb(df['adj_close'], df['bol_up'], df['bol_down'], self.signal_type,
+                                 self.combine, self.vote_threshold, self.weights)
+            df.rename(columns=dict(log_rets='returns'), inplace=True)
+            df['strategy'] = df['returns'] * df['signal']
+            if i == 0:
+                self.daily = df
+            else:
+                self.five_min = df
+
+    @property
+    def window(self):
+        return self.__window
+
+    @window.setter
+    def window(self, value):
+        self.__window = value
+        self.__get_data()
+
+    @property
+    def num_std(self):
+        return self.__num_std
+
+    @num_std.setter
+    def num_std(self, value):
+        self.__num_std = value
+        self.__get_data()
+
+    @property
+    def combine(self):
+        return self.__combine
+
+    @combine.setter
+    def combine(self, value):
+        self.__combine = value
+        self.__get_data()
+
+    @property
+    def weights(self):
+        return self.__weights
+
+    @weights.setter
+    def weights(self, value):
+        self.__weights = np.array(value)
+        self.__weights /= np.sum(self.__weights)
+        self.__get_data()
+
+    @property
+    def vote_threshold(self):
+        return self.__vote_threshold
+
+    @vote_threshold.setter
+    def vote_threshold(self, value):
+        self.__vote_threshold = value
+        self.__get_data()
+
+    def change_params(self, window=None, num_std=None, combine=None, weights=None, vote_threshold=None):
+        self.__window = window if window is not None else self.window
+        self.__num_std = num_std if num_std is not None else self.num_std
+        self.__combine = combine if combine is not None else self.combine
+        self.__weights = np.array(weights) if weights is not None else self.weights
+        self.__weights /= np.sum(self.__weights)
+        self.vote__threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
+        self.__get_data()
+
 
 
 

@@ -30,6 +30,7 @@ import scipy.optimize as sco
 from assets import Asset
 from typing import Optional
 from datetime import datetime, date
+import multiprocessing as mp
 
 DateLike = str | datetime | date | pd.Timestamp
 
@@ -824,19 +825,16 @@ class MA_Crossover(Strategy):
 
         old_params = {'short': self.short, 'long': self.long, 'ewm': self.ewm, 'param_type': self.ptype}
 
-        results = []
-        for short, long in product(short_range, long_range):
-            if self.ptype == 'alpha' and short <= long:
-                continue
-            elif short >= long:
-                continue
+        params = list(product(short_range, long_range))
 
-            self.change_params(short=short, long=long)
-            backtest_results = self.backtest(plot=False, 
-                                        timeframe=timeframe, 
-                                        start_date=start_date,
-                                        end_date=end_date)
-            results.append((short, long, backtest_results['returns'], backtest_results['strategy']))
+        if self.ptype == 'alpha':
+            params = [(short, long) for short, long in params if short > long]
+        else:
+            params = [(short, long) for short, long in params if short < long]
+
+        with mp.Pool(mp.cpu_count()) as pool:
+            results = pool.starmap(self._backtest_wrapper, [(short, long, timeframe, start_date, end_date) 
+                                                            for short, long in params])
 
         results = pd.DataFrame(results, columns=['short', 'long', 'hold_returns', 'strategy_returns'])
         results['net'] = results['strategy_returns'] - results['hold_returns']
@@ -855,6 +853,16 @@ class MA_Crossover(Strategy):
             self.change_params(**old_params)
 
         return results
+
+    def _backtest_wrapper(self, short: float, long: float, timeframe: str, 
+                          start_date: Optional[DateLike], end_date: Optional[DateLike]) -> tuple:
+        """Helper function to perform backtesting for a single parameter combination."""
+        self.change_params(short=short, long=long)
+        backtest_results = self.backtest(plot=False, 
+                                         timeframe=timeframe, 
+                                         start_date=start_date,
+                                         end_date=end_date)
+        return short, long, backtest_results['returns'], backtest_results['strategy']
 
     def optimize_weights(self):
         """Not implemented for MA Crossover strategy.
@@ -1649,6 +1657,37 @@ class MACD(Strategy):
 
         return fig
 
+    @classmethod
+    def _backtest_wrapper(cls, strategy_params: dict, fast: int, slow: int, signal: int, 
+                         timeframe: str, start_date: Optional[DateLike], 
+                         end_date: Optional[DateLike]) -> tuple:
+        """Helper function to perform backtesting for a single parameter combination.
+
+        Args:
+            strategy_params: Dictionary of parameters needed to initialize the strategy
+            fast: Fast EMA period
+            slow: Slow EMA period
+            signal: Signal line period
+            timeframe: Data frequency to use
+            start_date: Start date for backtest
+            end_date: End date for backtest
+
+        Returns:
+            tuple: (fast, slow, signal, hold_returns, strategy_returns)
+        """
+        # Create a fresh strategy instance for each test
+        strategy_params['fast'] = fast
+        strategy_params['slow'] = slow
+        strategy_params['signal'] = signal
+
+        strategy = cls(**strategy_params)
+        backtest_results = strategy.backtest(plot=False, 
+                                           timeframe=timeframe, 
+                                           start_date=start_date,
+                                           end_date=end_date)
+        del strategy
+        return fast, slow, signal, backtest_results['returns'], backtest_results['strategy']
+
     def optimize(self, inplace: bool = False, timeframe: str = '1d',
                 start_date: Optional[DateLike] = None, 
                 end_date: Optional[DateLike] = None,
@@ -1686,18 +1725,16 @@ class MACD(Strategy):
             signal_range = np.arange(5, 15, 2)
 
         old_params = {'fast': self.fast, 'slow': self.slow, 'signal': self.signal}
+        strategy_params = self._get_init_params()
 
-        results = []
-        for fast, slow, signal in product(fast_range, slow_range, signal_range):
-            if fast >= slow:
-                continue
+        params = list(product(fast_range, slow_range, signal_range))
+        params = [(fast, slow, signal) for fast, slow, signal in params if fast < slow]
 
-            self.change_params(fast=fast, slow=slow, signal=signal)
-            backtest_results = self.backtest(plot=False, 
-                             timeframe=timeframe, 
-                             start_date=start_date,
-                             end_date=end_date)
-            results.append((fast, slow, signal, backtest_results['returns'], backtest_results['strategy']))
+        args = [(strategy_params, fast, slow, signal, timeframe, start_date, end_date)
+                for fast, slow, signal in params]
+
+        with mp.Pool(mp.cpu_count()) as pool:
+            results = pool.starmap(self._backtest_wrapper, args)
 
         results = pd.DataFrame(results, columns=['fast', 'slow', 'signal', 'hold_returns', 'strategy_returns'])
         results['net'] = results['strategy_returns'] - results['hold_returns']
@@ -1713,6 +1750,20 @@ class MACD(Strategy):
             self.change_params(**old_params)
 
         return results
+
+    def _get_init_params(self) -> dict:
+        """Return the parameters needed to initialize a new instance of the strategy.
+
+        Returns:
+            dict: dict of parameters to instantiate a similar instance
+        """
+        return {
+            'asset': self.asset,
+            'signal_type': self.signal_type,
+            'combine': self.combine,
+            'weights': self.weights,
+            'vote_threshold': self.vote_threshold
+        }
 
 
 class BB(Strategy):

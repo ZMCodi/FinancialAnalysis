@@ -53,6 +53,7 @@ import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
 from typing import Optional
+import numba as nb
 
 def ma_crossover(short: pd.Series, long: pd.Series) -> np.ndarray:
     """Generate trading signals from moving average crossovers.
@@ -668,51 +669,57 @@ def find_double_patterns(hist: pd.Series, distance_min: int = 7,
 
     return _find_double_pattern_numba(hist, pos_peaks, neg_troughs, distance_max)
 
-import numba as nb
-@nb.jit
-def _find_double_pattern_numba(hist, pos_peaks, neg_troughs, distance_max):
 
+@nb.jit
+def _find_double_pattern_numba(hist: np.array, pos_peaks: np.array, neg_troughs: np.array, 
+                               distance_max: int) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Numba compiled helper function for find_double_pattern
+
+        Args:
+            hist (np.array): Array of historical values
+            pos_peaks (np.array): Array of positive peak indices
+            neg_troughs (np.array): Array of negative trough indices
+            distance_max (int): Maximum distance between patterns
+
+        Returns:
+            tuple[list[tuple[int, int]], list[tuple[int, int]]]: Lists of double tops and bottoms
+    """
     double_tops = []
+    double_bottoms = []
+
     # Find double tops (first higher than second)
-    for i in range(len(pos_peaks)-1):
+    for i in range(len(pos_peaks) - 1):
         peak1_idx = pos_peaks[i]
         peak1_val = hist[peak1_idx]
 
-        # Look at subsequent peaks within max distance
-        for j in range(i+1, len(pos_peaks)):
+        for j in range(i + 1, len(pos_peaks)):
             peak2_idx = pos_peaks[j]
             peak2_val = hist[peak2_idx]
 
-            # Check distance constraint
             if peak2_idx - peak1_idx > distance_max:
                 break
 
-            # First peak must be higher than second
             if peak1_val > peak2_val:
-                # Check for valley between peaks
                 valley = hist[peak1_idx:peak2_idx].min()
-                if valley < peak2_val:  # Significant valley between peaks
+                if valley < peak2_val:
                     double_tops.append((int(peak1_idx), int(peak2_idx)))
                     break
 
-    double_bottoms = []
     # Find double bottoms (first lower than second)
-    for i in range(len(neg_troughs)-1):
+    for i in range(len(neg_troughs) - 1):
         trough1_idx = neg_troughs[i]
         trough1_val = hist[trough1_idx]
 
-        for j in range(i+1, len(neg_troughs)):
+        for j in range(i + 1, len(neg_troughs)):
             trough2_idx = neg_troughs[j]
             trough2_val = hist[trough2_idx]
 
             if trough2_idx - trough1_idx > distance_max:
                 break
 
-            # First trough must be lower than second
             if trough1_val < trough2_val:
-                # Check for peak between troughs
                 peak = hist[trough1_idx:trough2_idx].max()
-                if peak > trough2_val:  # Significant peak between troughs
+                if peak > trough2_val:
                     double_bottoms.append((int(trough1_idx), int(trough2_idx)))
                     break
 

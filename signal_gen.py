@@ -664,16 +664,24 @@ def find_double_patterns(hist: pd.Series, distance_min: int = 7,
     # Filter for negative troughs only
     neg_troughs = troughs[hist.iloc[troughs] < 0]
 
+    hist = hist.values
+
+    return _find_double_pattern_numba(hist, pos_peaks, neg_troughs, distance_max)
+
+import numba as nb
+@nb.jit
+def _find_double_pattern_numba(hist, pos_peaks, neg_troughs, distance_max):
+
     double_tops = []
     # Find double tops (first higher than second)
     for i in range(len(pos_peaks)-1):
         peak1_idx = pos_peaks[i]
-        peak1_val = hist.iloc[peak1_idx]
+        peak1_val = hist[peak1_idx]
 
         # Look at subsequent peaks within max distance
         for j in range(i+1, len(pos_peaks)):
             peak2_idx = pos_peaks[j]
-            peak2_val = hist.iloc[peak2_idx]
+            peak2_val = hist[peak2_idx]
 
             # Check distance constraint
             if peak2_idx - peak1_idx > distance_max:
@@ -691,11 +699,11 @@ def find_double_patterns(hist: pd.Series, distance_min: int = 7,
     # Find double bottoms (first lower than second)
     for i in range(len(neg_troughs)-1):
         trough1_idx = neg_troughs[i]
-        trough1_val = hist.iloc[trough1_idx]
+        trough1_val = hist[trough1_idx]
 
         for j in range(i+1, len(neg_troughs)):
             trough2_idx = neg_troughs[j]
-            trough2_val = hist.iloc[trough2_idx]
+            trough2_val = hist[trough2_idx]
 
             if trough2_idx - trough1_idx > distance_max:
                 break

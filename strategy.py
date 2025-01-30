@@ -1243,6 +1243,38 @@ class RSI(Strategy):
 
         return fig
 
+    @classmethod
+    def _backtest_wrapper(cls, strategy_params: dict, ub: float, lb: float, window: int,
+                         m_rev_bound: float, timeframe: str, start_date: Optional[DateLike], 
+                         end_date: Optional[DateLike]) -> tuple:
+        """Helper function to perform backtesting for a single parameter combination.
+
+        Args:
+            strategy_params: Dictionary of parameters needed to initialize the strategy
+            fast: Fast EMA period
+            slow: Slow EMA period
+            signal: Signal line period
+            timeframe: Data frequency to use
+            start_date: Start date for backtest
+            end_date: End date for backtest
+
+        Returns:
+            tuple: (fast, slow, signal, hold_returns, strategy_returns)
+        """
+        # Create a fresh strategy instance for each test
+        strategy_params['ub'] = ub
+        strategy_params['lb'] = lb
+        strategy_params['window'] = window
+        strategy_params['m_rev_bound'] = m_rev_bound
+
+        strategy = cls(**strategy_params)
+        backtest_results = strategy.backtest(plot=False, 
+                                           timeframe=timeframe, 
+                                           start_date=start_date,
+                                           end_date=end_date)
+        del strategy
+        return ub, lb, window, m_rev_bound, backtest_results['returns'], backtest_results['strategy']
+
     def optimize(self, inplace: bool = False, timeframe: str = '1d',
                 start_date: Optional[DateLike] = None, 
                 end_date: Optional[DateLike] = None,
@@ -1293,18 +1325,17 @@ class RSI(Strategy):
 
         old_params = {'ub': self.ub, 'lb': self.lb, 'window': self.window,
                       'm_rev_bound': self.m_rev_bound}
+        strategy_params = self._get_init_params()
 
-        results = []
-        for ub, lb, window, m_rev_bound in product(*params):
-            if ub <= lb or m_rev_bound >= ub or m_rev_bound <= lb:
-                continue
+        params = list(product(*params))
+        params = [(ub, lb, window, m_rev_bound) for ub, lb, window, m_rev_bound in params if ub > lb and
+                  m_rev_bound < ub and m_rev_bound > lb]
 
-            self.change_params(ub=ub, lb=lb, window=window, m_rev_bound=m_rev_bound)
-            backtest_results = self.backtest(plot=False, 
-                                        timeframe=timeframe, 
-                                        start_date=start_date,
-                                        end_date=end_date)
-            results.append((ub, lb, window, m_rev_bound, backtest_results['returns'], backtest_results['strategy']))
+        args = [(strategy_params, ub, lb, window, m_rev_bound, timeframe, start_date, end_date)
+                for ub, lb, window, m_rev_bound in params]
+
+        with mp.Pool(mp.cpu_count()) as pool:
+            results = pool.starmap(self._backtest_wrapper, args)
 
         results = pd.DataFrame(results, columns=['ub', 'lb', 'window', 'm_rev_bound', 'hold_returns', 'strategy_returns'])
         results['net'] = results['strategy_returns'] - results['hold_returns']
@@ -1321,6 +1352,22 @@ class RSI(Strategy):
             self.change_params(**old_params)
 
         return results
+
+    def _get_init_params(self) -> dict:
+        """Return the parameters needed to initialize a new instance of the strategy.
+
+        Returns:
+            dict: dict of parameters to instantiate a similar instance
+        """
+        return {
+            'asset': self.asset,
+            'exit': self.exit,
+            'm_rev': self.m_rev,
+            'signal_type': self.signal_type,
+            'combine': self.combine,
+            'weights': self.weights,
+            'vote_threshold': self.vote_threshold
+        }
 
 
 class MACD(Strategy):

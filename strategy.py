@@ -610,7 +610,7 @@ class RSI(Strategy):
         else:
             price = go.Scatter(
                         x=df.index,
-                        y=df['close'],
+                        y=df['adj_close'],
                         line=dict(
                             color='#2962FF',
                             width=2,
@@ -902,7 +902,7 @@ class MACD(Strategy):
         else:
             price = go.Scatter(
                         x=df.index,
-                        y=df['close'],
+                        y=df['adj_close'],
                         line=dict(
                             color='#2962FF',
                             width=2,
@@ -1120,12 +1120,12 @@ class MACD(Strategy):
 
 
 class BB(Strategy):
-    
+
     def __init__(self, asset, window=20, num_std=2, signal_type=None, combine='weighted', weights=None, vote_threshold=0.5):
         super().__init__(asset)
         self.__window = window
         self.__num_std = num_std
-        
+
         if signal_type is not None:
             self.signal_type = list(signal_type)
         else:
@@ -1151,7 +1151,6 @@ class BB(Strategy):
         for i, df in enumerate([self.daily, self.five_min]):
             data = df['adj_close']
             name = 'daily' if i == 0 else 'five_min'
-            ptype = 'span' if self.ptype == 'window' and self.ewm else self.ptype
 
             df[['sma', 'bol_up', 'bol_down']] = self.engine.calculate_bb(data, self.window, self.num_std, name)
             df.dropna(inplace=True)
@@ -1219,6 +1218,151 @@ class BB(Strategy):
         self.__weights /= np.sum(self.__weights)
         self.vote__threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
         self.__get_data()
+
+    def plot(self, timeframe='1d', start_date=None, end_date=None,
+            candlestick=True, show_signal=True):
+        
+        df = self.daily if timeframe == '1d' else self.five_min
+
+        if start_date is not None:
+            df = df[df.index >= start_date]
+        if end_date is not None:
+            df = df[df.index <= end_date]
+
+        df.dropna(inplace=True)
+
+        fig = go.Figure()
+
+        traces = []
+
+        if candlestick:
+            price = go.Candlestick(
+                        x=df.index,
+                        open=df['open'],
+                        high=df['high'],
+                        low=df['low'],
+                        close=df['close'],
+                        name=f'{self.asset.ticker} OHLC',
+            )
+
+            sma = go.Scatter(
+                        x=df.index,
+                        y=df['sma'],
+                        line=dict(
+                            color='#2962FF',
+                            width=2,
+                            dash='solid'
+                        ),
+                        name=f'{self.asset.ticker} SMA',
+            )
+
+            traces.extend([price, sma])
+        else:
+            price = go.Scatter(
+                        x=df.index,
+                        y=df['adj_close'],
+                        line=dict(
+                            color='#2962FF',
+                            width=2,
+                            dash='solid'
+                        ),
+                        name=f'{self.asset.ticker} Price',
+            )
+
+            traces.append(price)
+
+        bol_down = go.Scatter(
+            x=df.index,
+            y=df['bol_down'],
+            line=dict(color='#FF4081', width=1, dash='dash'),
+            showlegend=False,
+            name='lower band'
+        )
+
+        bol_up = go.Scatter(
+            x=df.index,
+            y=df['bol_up'],
+            fill='tonexty',
+            line=dict(color='#FF4081', width=1, dash='dash'),
+            fillcolor='rgba(68, 68, 255, 0.1)',
+            showlegend=False,
+            name='upper band'
+        )
+
+        traces.extend([bol_down, bol_up])
+
+        if show_signal:
+            signal = go.Scatter(
+                        x=df.index,
+                        y=df['signal'],
+                        line=dict(color='green', width=0.8, dash='solid'),
+                        name='Buy/Sell signal',
+                        yaxis='y2'
+            )
+
+            traces.append(signal)
+
+        fig.add_traces(traces)
+
+        layout = {}
+
+        layout['title'] = dict(
+                text=f'{self.asset.ticker} BB Strategy ({self.params})',
+                x=0.5,
+                y=0.95
+            )
+
+        layout['xaxis'] = dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(128,128,128,0.2)',
+                title=None,
+            )
+
+        layout['yaxis'] = dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(128,128,128,0.2)',
+                title=f'Price ({self.asset.currency})',
+            )
+
+        layout[f'xaxis1_rangeslider_visible'] = False
+
+        layout['height'] = 800
+
+        if show_signal:
+            layout['yaxis2'] = dict(
+                    title='Signal',
+                    overlaying='y',
+                    side='right',
+                    range=[-1.1, 1.1],
+                    tickmode='array',
+                    tickvals=[-1, 1],
+                    ticktext=['Sell', 'Buy']
+                )
+
+        layout['legend'] = dict(
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+                orientation="h",  # horizontal layout
+                bgcolor='rgba(255,255,255,0.8)'
+            )
+
+        fig.update_layout(**layout,
+                            paper_bgcolor='white',
+                            plot_bgcolor='rgba(240,240,240,0.95)',
+                            hovermode='x unified')
+
+        fig.show()
+
+        return fig
+
+
+
+    def optimize(self):
+        pass
 
 
 

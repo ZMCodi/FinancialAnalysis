@@ -1716,8 +1716,45 @@ class MACD(Strategy):
 
 
 class BB(Strategy):
+    """Bollinger Bands trading strategy implementation.
+    
+    Implements a strategy based on Bollinger Bands with multiple signal generation methods:
+    - Band bounces (price reversal at bands)
+    - Double bounces (multiple tests of bands)
+    - Band walks (price riding along bands)
+    - Band squeeze (volatility contraction)
+    - Band breakouts (price breaking outside bands)
+    - %B indicator (normalized position within bands)
 
-    def __init__(self, asset, window=20, num_std=2, signal_type=None, combine='weighted', weights=None, vote_threshold=0.5):
+    Supports signal combination through weighted voting or consensus mechanisms.
+
+    Attributes:
+        asset (Asset): Asset to apply the strategy to
+        window (int): Period for moving average and standard deviation
+        num_std (float): Number of standard deviations for band width
+        signal_type (list[str]): Active signal generation methods
+        combine (str): Signal combination method ('weighted' or 'consensus')
+        weights (np.ndarray): Weights for each signal type
+        vote_threshold (float): Threshold for signal voting
+        engine (TAEngine): Technical analysis calculation engine
+        params (str): String representation of strategy parameters (window±std)
+    """
+
+    def __init__(self, asset: Asset, window: int = 20, num_std: float = 2,
+                 signal_type: Optional[list[str]] = None, combine: str = 'weighted',
+                 weights: Optional[np.ndarray] = None, vote_threshold: float = 0.5):
+        """Initialize the Bollinger Bands strategy.
+
+        Args:
+            asset (Asset): Asset to apply the strategy to
+            window (int, optional): MA and std dev period. Defaults to 20.
+            num_std (float, optional): Band width in standard deviations. Defaults to 2.
+            signal_type (list[str], optional): Signal types to use. Defaults to
+                ['bounce', 'double', 'walks', 'squeeze', 'breakout', '%B'].
+            combine (str, optional): Signal combination method. Defaults to 'weighted'.
+            weights (np.ndarray, optional): Signal weights. Defaults to equal weights.
+            vote_threshold (float, optional): Voting threshold. Defaults to 0.5.
+        """
         super().__init__(asset)
         self.__window = window
         self.__num_std = num_std
@@ -1739,7 +1776,15 @@ class BB(Strategy):
         self.engine = TAEngine()
         self.__get_data()
 
-    def __get_data(self):
+    def __get_data(self) -> None:
+        """Calculate Bollinger Bands components and generate trading signals.
+        
+        Updates both daily and 5-minute dataframes with:
+        - Simple moving average (middle band)
+        - Upper and lower Bollinger Bands
+        - Combined trading signals from multiple signal types
+        - Strategy returns (signal * returns)
+        """
         self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
         self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
         self.params = f'window={self.window}(±{self.num_std})'
@@ -1748,13 +1793,16 @@ class BB(Strategy):
             data = df['adj_close']
             name = 'daily' if i == 0 else 'five_min'
 
-            df[['sma', 'bol_up', 'bol_down']] = self.engine.calculate_bb(data, self.window, self.num_std, name)
+            df[['sma', 'bol_up', 'bol_down']] = self.engine.calculate_bb(
+                data, self.window, self.num_std, name)
             df.dropna(inplace=True)
 
-            df['signal'] = sg.bb(df['adj_close'], df['bol_up'], df['bol_down'], self.signal_type,
-                                 self.combine, self.vote_threshold, self.weights)
+            df['signal'] = sg.bb(df['adj_close'], df['bol_up'], df['bol_down'],
+                               self.signal_type, self.combine, self.vote_threshold, 
+                               self.weights)
             df.rename(columns=dict(log_rets='returns'), inplace=True)
             df['strategy'] = df['returns'] * df['signal']
+
             if i == 0:
                 self.daily = df
             else:
@@ -1806,7 +1854,18 @@ class BB(Strategy):
         self.__vote_threshold = value
         self.__get_data()
 
-    def change_params(self, window=None, num_std=None, combine=None, weights=None, vote_threshold=None):
+    def change_params(self, window: Optional[int] = None, num_std: Optional[float] = None,
+                     combine: Optional[str] = None, weights: Optional[np.ndarray] = None,
+                     vote_threshold: Optional[float] = None) -> None:
+        """Update multiple strategy parameters at once.
+
+        Args:
+            window (int, optional): New window period. Defaults to None.
+            num_std (float, optional): New std dev multiplier. Defaults to None.
+            combine (str, optional): New combination method. Defaults to None.
+            weights (np.ndarray, optional): New signal weights. Defaults to None.
+            vote_threshold (float, optional): New voting threshold. Defaults to None.
+        """
         self.__window = window if window is not None else self.window
         self.__num_std = num_std if num_std is not None else self.num_std
         self.__combine = combine if combine is not None else self.combine
@@ -1815,9 +1874,27 @@ class BB(Strategy):
         self.__vote_threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
         self.__get_data()
 
-    def plot(self, timeframe='1d', start_date=None, end_date=None,
-            candlestick=True, show_signal=True):
-        
+    def plot(self, timeframe: str = '1d', start_date: Optional[DateLike] = None,
+            end_date: Optional[DateLike] = None, candlestick: bool = True,
+            show_signal: bool = True) -> go.Figure:
+        """Create interactive plot of Bollinger Bands and signals.
+
+        Creates a plot showing:
+        - Price (candlestick or line)
+        - Middle band (SMA)
+        - Upper and lower Bollinger Bands with shaded area
+        - Trading signals if requested
+
+        Args:
+            timeframe (str, optional): Data frequency to plot ('1d' or '5m'). Defaults to '1d'.
+            start_date (DateLike, optional): Start date to plot from. Defaults to None.
+            end_date (DateLike, optional): End date to plot to. Defaults to None.
+            candlestick (bool, optional): Use candlestick chart. Defaults to True.
+            show_signal (bool, optional): Show trading signals. Defaults to True.
+
+        Returns:
+            go.Figure: Plotly figure with Bollinger Bands, price, and signals
+        """
         df = self.daily if timeframe == '1d' else self.five_min
 
         if start_date is not None:
@@ -1955,10 +2032,33 @@ class BB(Strategy):
 
         return fig
 
+    def optimize(self, inplace: bool = False, timeframe: str = '1d',
+                start_date: Optional[DateLike] = None, 
+                end_date: Optional[DateLike] = None,
+                window_range: Optional[np.ndarray] = None,
+                num_std_range: Optional[np.ndarray] = None) -> pd.DataFrame:
+        """Optimize Bollinger Bands parameters through grid search.
 
-    def optimize(self, inplace=False, timeframe='1d', start_date=None, end_date=None,
-                 window_range=None, num_std_range=None):
+        Tests combinations of window period and standard deviation multiplier
+        to find the best performing settings based on strategy returns vs
+        buy-and-hold returns.
 
+        Args:
+            inplace (bool, optional): Update strategy parameters. Defaults to False.
+            timeframe (str, optional): Data frequency to use ('1d' or '5m'). Defaults to '1d'.
+            start_date (DateLike, optional): Start date for optimization. Defaults to None.
+            end_date (DateLike, optional): End date for optimization. Defaults to None.
+            window_range (np.ndarray, optional): Windows to test. Defaults to [10-50, step=5].
+            num_std_range (np.ndarray, optional): Std dev multipliers. Defaults to [1.5-2.5, step=0.1].
+
+        Returns:
+            pd.DataFrame: Results sorted by net returns (strategy - hold), containing:
+                - window: MA and std dev period
+                - num_std: Band width multiplier
+                - hold_returns: Buy-and-hold returns
+                - strategy_returns: Strategy returns
+                - net: Net returns (strategy - hold)
+        """
         if window_range is None:
             window_range = np.arange(10, 51, 5)
         if num_std_range is None:

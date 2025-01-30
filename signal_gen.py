@@ -6,7 +6,34 @@ def ma_crossover(short, long):
     return np.where(short > long, 1, -1)
 
 
-def rsi(RSI, ub, lb, exit, m_rev_bound=None):
+def rsi(RSI, price, ub, lb, exit, signal_type, combine, threshold, weights=None, m_rev_bound=50):
+    signals = pd.DataFrame(index=RSI.index)
+
+    if 'crossover' in signal_type:
+        signals['crossover'] = rsi_crossover(RSI, ub, lb, exit, m_rev_bound)
+
+    if 'divergence' in signal_type:
+        signals['divergence'] = rsi_divergence(RSI, price, False)
+
+    if 'hidden divergence' in signal_type:
+        signals['hidden_div'] = rsi_divergence(RSI, price, True)
+
+    if combine == 'unanimous':
+        threshold = 1
+        weights = [1 / len(signals.columns)] * len(signals.columns)
+    elif combine == 'majority':
+        weights = [1 / len(signals.columns)] * len(signals.columns)
+
+    signal = vote(signals, threshold, weights)
+
+    return signal
+
+
+def rsi_divergence(RSI, price, hidden=False):
+    return divergence_signals(RSI, *find_momentum_divergence(price, RSI, hidden=hidden))
+
+
+def rsi_crossover(RSI, ub, lb, exit, m_rev_bound=None):
     if exit == 're':
         signal = np.where(
             (RSI.shift(1) > ub) & (RSI < ub), -1, 
@@ -40,10 +67,10 @@ def macd(macd_hist, macd, price, signal_type, combine, threshold, weights=None):
         signals['crossover'] = np.where(macd_hist > 0, 1, -1)
 
     if 'divergence' in signal_type:
-        signals['divergence'] = macd_divergence(macd_hist, price, False)
+        signals['divergence'] = macd_divergence(macd, price, False)
 
     if 'hidden divergence' in signal_type:
-        signals['hidden_div'] = macd_divergence(macd_hist, price, True)
+        signals['hidden_div'] = macd_divergence(macd, price, True)
 
     if 'momentum' in signal_type:
         signals['momentum'] = macd_momentum(macd_hist)

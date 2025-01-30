@@ -250,7 +250,7 @@ class Strategy(ABC):
 
             return -combined_returns - diversity_bonus + extreme_penalty
 
-        n_weights = len(self.signal_type)
+        n_weights = len(self.weights)
         if threshold_range is None:
             threshold_range = np.arange(0.2, 0.9, 0.1)
 
@@ -544,7 +544,8 @@ class MA_Crossover(Strategy):
 
 class RSI(Strategy):
 
-    def __init__(self, asset, ub=70, lb=30, window=14, exit='re', m_rev=True, m_rev_bound=50):
+    def __init__(self, asset, ub=70, lb=30, window=14, exit='re', m_rev=True, m_rev_bound=50,
+                 signal_type=None, combine='weighted', weights=None, vote_threshold=0.5,):
 
         super().__init__(asset)
         self.__ub = ub
@@ -553,6 +554,20 @@ class RSI(Strategy):
         self.__exit = exit
         self.__m_rev = m_rev
         self.__m_rev_bound = m_rev_bound
+        if signal_type is not None:
+            self.signal_type = list(signal_type)
+        else:
+            self.signal_type = ['crossover', 'divergence', 'hidden divergence']
+
+        self.__combine = str(combine)
+
+        if weights is not None:
+            self.__weights = np.array(weights)
+        else:
+            self.__weights = np.array([1 / len(self.signal_type)] * len(self.signal_type))
+        self.__weights /= np.sum(self.__weights)
+
+        self.__vote_threshold = vote_threshold
         self.engine = TAEngine()
         self.__get_data()
 
@@ -572,8 +587,8 @@ class RSI(Strategy):
             df['rsi'] = self.engine.calculate_rsi(data, self.window, name)
             df.dropna(inplace=True)
 
-            df['signal'] = sg.rsi(df['rsi'], self.ub, self.lb, self.exit, 
-                            self.m_rev_bound if self.m_rev else None)
+            df['signal'] = sg.rsi(df['rsi'], df['adj_close'], self.ub, self.lb, self.exit, self.signal_type,
+                            self.combine, self.vote_threshold, self.weights, self.m_rev_bound if self.m_rev else None)
 
             df.rename(columns=dict(log_rets='returns'), inplace=True)
             df['strategy'] = df['returns'] * df['signal']
@@ -637,13 +652,45 @@ class RSI(Strategy):
         self.__m_rev_bound = value
         self.__get_data()
 
-    def change_params(self, ub=None, lb=None, window=None, exit=None, m_rev=None, m_rev_bound=None):
+    @property
+    def combine(self):
+        return self.__combine
+
+    @combine.setter
+    def combine(self, value):
+        self.__combine = value
+        self.__get_data()
+
+    @property
+    def weights(self):
+        return self.__weights
+
+    @weights.setter
+    def weights(self, value):
+        self.__weights = np.array(value)
+        self.__weights /= np.sum(self.__weights)
+        self.__get_data()
+
+    @property
+    def vote_threshold(self):
+        return self.__vote_threshold
+
+    @vote_threshold.setter
+    def vote_threshold(self, value):
+        self.__vote_threshold = value
+        self.__get_data()
+
+    def change_params(self, ub=None, lb=None, window=None, exit=None, m_rev=None, m_rev_bound=None,
+                      combine=None, weights=None, vote_threshold=None):
         self.__ub = ub if ub is not None else self.ub
         self.__lb = lb if lb is not None else self.lb
         self.__window = window if window is not None else self.window
         self.__exit = exit if exit is not None else self.exit
         self.__m_rev = m_rev if m_rev is not None else self.m_rev
         self.__m_rev_bound = m_rev_bound if m_rev_bound is not None else self.m_rev_bound
+        self.__weights = np.array(weights) if weights is not None else self.weights
+        self.__weights /= np.sum(self.__weights)
+        self.__vote_threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
         self.__get_data()
 
     def plot(self, timeframe='1d', start_date=None, end_date=None,
@@ -820,9 +867,6 @@ class RSI(Strategy):
             self.change_params(**old_params)
 
         return results
-    
-    def optimize_weights(self):
-        raise NotImplementedError("No weights associated with this strategy")
 
 
 class MACD(Strategy):
@@ -865,7 +909,7 @@ class MACD(Strategy):
             df[['macd', 'signal_line', 'macd_hist']] = self.engine.calculate_macd(data, [self.fast, self.slow, self.signal], name)
             df.dropna(inplace=True)
 
-            df['signal'] = sg.macd(df['macd'], df['log_rets'], self.signal_type, 
+            df['signal'] = sg.macd(df['macd_hist'], df['macd'], df['adj_close'], self.signal_type, 
                                    self.combine, self.vote_threshold, self.weights)
 
             df.rename(columns=dict(log_rets='returns'), inplace=True)
@@ -938,7 +982,7 @@ class MACD(Strategy):
         self.__combine = combine if combine is not None else self.combine
         self.__weights = np.array(weights) if weights is not None else self.weights
         self.__weights /= np.sum(self.__weights)
-        self.vote__threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
+        self.__vote_threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
         self.__get_data()
 
     def plot(self, timeframe='1d', start_date=None, end_date=None,
@@ -1219,7 +1263,7 @@ class BB(Strategy):
         self.__combine = combine if combine is not None else self.combine
         self.__weights = np.array(weights) if weights is not None else self.weights
         self.__weights /= np.sum(self.__weights)
-        self.vote__threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
+        self.__vote_threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
         self.__get_data()
 
     def plot(self, timeframe='1d', start_date=None, end_date=None,
@@ -1479,6 +1523,14 @@ class CombinedStrategy(Strategy):
         self.__vote_threshold = value
         self.__get_data()
 
+    def change_params(self, strategies=None, combine=None, weights=None, vote_threshold=None):
+        self.__strategies = list(strategies) if strategies is not None else self.strategies
+        self.__combine = combine if combine is not None else self.combine
+        self.__weights = np.array(weights) if weights is not None else self.weights
+        self.__weights /= np.sum(self.__weights)
+        self.__vote_threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
+        self.__get_data()
+
     def plot(self, timeframe='1d', start_date=None, end_date=None,
              candlestick=True):
         df = self.daily if timeframe == '1d' else self.five_min
@@ -1577,8 +1629,10 @@ class CombinedStrategy(Strategy):
 
         return fig
 
-    def optimize(self):
-        pass
+    def optimize(self, inplace=False, timeframe='1d', start_date=None,
+                 end_date=None, threshold_range=None, runs=10):
+        return self.optimize_weights(inplace, timeframe, start_date,
+                                     end_date, threshold_range, runs)
 
 
 

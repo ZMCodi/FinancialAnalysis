@@ -613,39 +613,19 @@ class MA_Crossover(Strategy):
 
     @property
     def short(self) -> float:
-        """Short-term moving average parameter.
-
-        Returns:
-            float: Parameter value for short-term MA
-        """
         return self.__short
 
     @short.setter
     def short(self, value: float) -> None:
-        """Set short-term moving average parameter.
-
-        Args:
-            value (float): New parameter value for short-term MA
-        """
         self.__short = value
         self.__get_data()
 
     @property
     def long(self) -> float:
-        """Long-term moving average parameter.
-
-        Returns:
-            float: Parameter value for long-term MA
-        """
         return self.__long
 
     @long.setter
     def long(self, value: float) -> None:
-        """Set long-term moving average parameter.
-
-        Args:
-            value (float): New parameter value for long-term MA
-        """
         self.__long = value
         self.__get_data()
 
@@ -886,10 +866,54 @@ class MA_Crossover(Strategy):
 
 
 class RSI(Strategy):
+    """Relative Strength Index (RSI) trading strategy implementation.
+    
+    Implements a strategy based on RSI signals with multiple signal generation methods:
+    - Traditional overbought/oversold crossovers
+    - Price/RSI divergence
+    - Hidden divergence
+    - Mean reversion
 
-    def __init__(self, asset, ub=70, lb=30, window=14, exit='re', m_rev=True, m_rev_bound=50,
-                 signal_type=None, combine='weighted', weights=None, vote_threshold=0.5,):
+    Supports signal combination through weighted voting or consensus mechanisms.
 
+    Attributes:
+        asset (Asset): Asset to apply the strategy to
+        ub (float): Upper bound for overbought condition
+        lb (float): Lower bound for oversold condition
+        window (int): RSI calculation period
+        exit (str): Exit signal type ('re' for mean reversion or other custom types)
+        m_rev (bool): Whether to use mean reversion signals
+        m_rev_bound (float): Mean reversion boundary level
+        signal_type (list[str]): List of signal types to use
+        combine (str): Signal combination method ('weighted' or 'consensus')
+        weights (np.ndarray): Weights for combining different signal types
+        vote_threshold (float): Threshold for signal voting
+        engine (TAEngine): Technical analysis calculation engine
+        params (str): String representation of strategy parameters (ub/lb)
+        daily (pd.DataFrame): Daily data with signals and strategy returns
+        five_min (pd.DataFrame): 5-minute data with signals and strategy returns
+    """
+
+    def __init__(self, asset: Asset, ub: float = 70, lb: float = 30, window: int = 14,
+                 exit: str = 're', m_rev: bool = True, m_rev_bound: float = 50,
+                 signal_type: Optional[list[str]] = None, combine: str = 'weighted',
+                 weights: Optional[np.ndarray] = None, vote_threshold: float = 0.5):
+        """Initialize the RSI strategy.
+
+        Args:
+            asset (Asset): Asset to apply the strategy to
+            ub (float, optional): Upper bound for overbought. Defaults to 70.
+            lb (float, optional): Lower bound for oversold. Defaults to 30.
+            window (int, optional): RSI calculation period. Defaults to 14.
+            exit (str, optional): Exit signal type. Defaults to 're' (mean reversion).
+            m_rev (bool, optional): Use mean reversion signals. Defaults to True.
+            m_rev_bound (float, optional): Mean reversion level. Defaults to 50.
+            signal_type (list[str], optional): Signal types to use. Defaults to
+                ['crossover', 'divergence', 'hidden divergence'].
+            combine (str, optional): Signal combination method. Defaults to 'weighted'.
+            weights (np.ndarray, optional): Signal weights. Defaults to equal weights.
+            vote_threshold (float, optional): Voting threshold. Defaults to 0.5.
+        """
         super().__init__(asset)
         self.__ub = ub
         self.__lb = lb
@@ -897,6 +921,7 @@ class RSI(Strategy):
         self.__exit = exit
         self.__m_rev = m_rev
         self.__m_rev_bound = m_rev_bound
+
         if signal_type is not None:
             self.signal_type = list(signal_type)
         else:
@@ -914,10 +939,22 @@ class RSI(Strategy):
         self.engine = TAEngine()
         self.__get_data()
 
-    def __str__(self):
+    def __str__(self) -> str:
+        """String representation of the strategy.
+
+        Returns:
+            str: Strategy description with parameters
+        """
         return f'RSI({self.asset.ticker}, ub={self.ub}, lb={self.lb}, window={self.window}, exit={self.exit}, m_rev={self.m_rev}, m_rev_bound={self.m_rev_bound})'
 
-    def __get_data(self):
+    def __get_data(self) -> None:
+        """Calculate RSI and generate trading signals.
+        
+        Updates both daily and 5-minute dataframes with:
+        - RSI values
+        - Combined trading signals from multiple signal types
+        - Strategy returns (signal * returns)
+        """
         self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
         self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
 
@@ -930,8 +967,10 @@ class RSI(Strategy):
             df['rsi'] = self.engine.calculate_rsi(data, self.window, name)
             df.dropna(inplace=True)
 
-            df['signal'] = sg.rsi(df['rsi'], df['adj_close'], self.ub, self.lb, self.exit, self.signal_type,
-                            self.combine, self.vote_threshold, self.weights, self.m_rev_bound if self.m_rev else None)
+            df['signal'] = sg.rsi(df['rsi'], df['adj_close'], self.ub, self.lb, 
+                                self.exit, self.signal_type, self.combine, 
+                                self.vote_threshold, self.weights, 
+                                self.m_rev_bound if self.m_rev else None)
 
             df.rename(columns=dict(log_rets='returns'), inplace=True)
             df['strategy'] = df['returns'] * df['signal']
@@ -940,6 +979,9 @@ class RSI(Strategy):
                 self.daily = df
             else:
                 self.five_min = df
+
+    # Property getters and setters for strategy parameters
+    # Each property includes validation and triggers data recalculation
 
     @property
     def ub(self):
@@ -1023,8 +1065,24 @@ class RSI(Strategy):
         self.__vote_threshold = value
         self.__get_data()
 
-    def change_params(self, ub=None, lb=None, window=None, exit=None, m_rev=None, m_rev_bound=None,
-                      combine=None, weights=None, vote_threshold=None):
+    def change_params(self, ub: Optional[float] = None, lb: Optional[float] = None,
+                     window: Optional[int] = None, exit: Optional[str] = None,
+                     m_rev: Optional[bool] = None, m_rev_bound: Optional[float] = None,
+                     combine: Optional[str] = None, weights: Optional[np.ndarray] = None,
+                     vote_threshold: Optional[float] = None) -> None:
+        """Update multiple strategy parameters at once.
+
+        Args:
+            ub (float, optional): New upper bound. Defaults to None.
+            lb (float, optional): New lower bound. Defaults to None.
+            window (int, optional): New RSI period. Defaults to None.
+            exit (str, optional): New exit type. Defaults to None.
+            m_rev (bool, optional): Use mean reversion. Defaults to None.
+            m_rev_bound (float, optional): New mean reversion level. Defaults to None.
+            combine (str, optional): New combination method. Defaults to None.
+            weights (np.ndarray, optional): New signal weights. Defaults to None.
+            vote_threshold (float, optional): New voting threshold. Defaults to None.
+        """
         self.__ub = ub if ub is not None else self.ub
         self.__lb = lb if lb is not None else self.lb
         self.__window = window if window is not None else self.window
@@ -1036,9 +1094,25 @@ class RSI(Strategy):
         self.__vote_threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
         self.__get_data()
 
-    def plot(self, timeframe='1d', start_date=None, end_date=None,
-            candlestick=True, show_signal=True):
+    def plot(self, timeframe: str = '1d', start_date: Optional[DateLike] = None,
+            end_date: Optional[DateLike] = None, candlestick: bool = True,
+            show_signal: bool = True) -> go.Figure:
+        """Create interactive plot of RSI and price with signals.
 
+        Creates a two-panel plot with:
+        - Top panel: Price (candlestick or line) with signals
+        - Bottom panel: RSI with overbought/oversold levels
+
+        Args:
+            timeframe (str, optional): Data frequency to plot ('1d' or '5m'). Defaults to '1d'.
+            start_date (DateLike, optional): Start date to plot from. Defaults to None.
+            end_date (DateLike, optional): End date to plot to. Defaults to None.
+            candlestick (bool, optional): Use candlestick chart. Defaults to True.
+            show_signal (bool, optional): Show trading signals. Defaults to True.
+
+        Returns:
+            go.Figure: Plotly figure with RSI, price, and signals
+        """
         df = self.daily if timeframe == '1d' else self.five_min
 
         if start_date is not None:
@@ -1161,9 +1235,38 @@ class RSI(Strategy):
 
         return fig
 
-    def optimize(self, inplace=False, timeframe='1d', start_date=None, end_date=None,
-                ub_range=None, lb_range=None, window_range=None, m_rev_bound_range=None):
+    def optimize(self, inplace: bool = False, timeframe: str = '1d',
+                start_date: Optional[DateLike] = None, 
+                end_date: Optional[DateLike] = None,
+                ub_range: Optional[np.ndarray] = None,
+                lb_range: Optional[np.ndarray] = None,
+                window_range: Optional[np.ndarray] = None,
+                m_rev_bound_range: Optional[np.ndarray] = None) -> pd.DataFrame:
+        """Optimize RSI parameters through grid search.
 
+        Tests combinations of parameters to find the best performing settings
+        based on strategy returns vs buy-and-hold returns.
+
+        Args:
+            inplace (bool, optional): Update strategy parameters. Defaults to False.
+            timeframe (str, optional): Data frequency to use ('1d' or '5m'). Defaults to '1d'.
+            start_date (DateLike, optional): Start date for optimization. Defaults to None.
+            end_date (DateLike, optional): End date for optimization. Defaults to None.
+            ub_range (np.ndarray, optional): Upper bounds to test. Defaults to [60-80, step=5].
+            lb_range (np.ndarray, optional): Lower bounds to test. Defaults to [20-40, step=5].
+            window_range (np.ndarray, optional): Windows to test. Defaults to [10-30, step=5].
+            m_rev_bound_range (np.ndarray, optional): Mean reversion levels. Defaults to [40-60, step=5].
+
+        Returns:
+            pd.DataFrame: Results sorted by net returns (strategy - hold), containing:
+                - ub: Upper bound
+                - lb: Lower bound
+                - window: RSI period
+                - m_rev_bound: Mean reversion level
+                - hold_returns: Buy-and-hold returns
+                - strategy_returns: Strategy returns
+                - net: Net returns (strategy - hold)
+        """
         if ub_range is None:
             ub_range = np.arange(60, 81, 5)
         if lb_range is None:

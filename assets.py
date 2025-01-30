@@ -24,7 +24,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy import stats
 from config import DB_CONFIG
-from typing import Self, Optional
+from typing import Optional
 
 DateLike = str | datetime | date | pd.Timestamp
 
@@ -47,7 +47,7 @@ class Asset():
     def __repr__(self) -> str:
         return f'Asset({self.ticker!r})'
     
-    def __eq__(self, other: Self) -> bool:
+    def __eq__(self, other) -> bool:
         return self.ticker == other.ticker
     
     def __hash__(self) -> int:
@@ -831,7 +831,7 @@ class Asset():
                                 alpha=0.1, color='#2962FF')
 
             # Customize the plot
-            ax.set_title(f'{self.ticker} Moving Average ({param}) {f'with Bollinger Bands ({num_std=})' if bollinger_bands else ''}', pad=20)
+            ax.set_title(f'{self.ticker} Moving Average ({param}) {f"with Bollinger Bands ({num_std=})" if bollinger_bands else ""}', pad=20)
             ax.set_xlabel('Date')
             ax.set_ylabel(f'Price ({self.currency})')
 
@@ -908,7 +908,7 @@ class Asset():
             # update layout
             fig.update_layout(
                 title=dict(
-                    text=f'{self.ticker} Moving Average ({param}) {f'with Bollinger Bands ({num_std=})' if bollinger_bands else ''}',
+                    text=f'{self.ticker} Moving Average ({param}) {f"with Bollinger Bands ({num_std=})" if bollinger_bands else ""}',
                     x=0.5,  # Center the title
                     y=0.95
                 ) if standalone else None,
@@ -943,7 +943,7 @@ class Asset():
                     col=subplot_idx[1] if subplot_idx else None
                 )
                 fig.update_xaxes(
-                    title_text=f'{self.ticker} Moving Average {f'with Bollinger Bands ({num_std=})' if bollinger_bands else ''}', 
+                    title_text=f'{self.ticker} Moving Average ({param}) {f"with Bollinger Bands ({num_std=})" if bollinger_bands else ""}', 
                     row=subplot_idx[0] if subplot_idx else None, 
                     col=subplot_idx[1] if subplot_idx else None
                 )
@@ -983,10 +983,11 @@ class Asset():
         data = data.dropna()
 
         # Calculate statistics
+        newline = "\n" if not interactive else "<br>"
         stats_text = (
-            f'Mean: {np.mean(data):.4f}{'\n' if not interactive else '<br>'}'
-            f'Std Dev: {np.std(data):.4f}{'\n' if not interactive else '<br>'}'
-            f'Skewness: {stats.skew(data):.4f}{'\n' if not interactive else '<br>'}'
+            f'Mean: {np.mean(data):.4f}{newline}'
+            f'Std Dev: {np.std(data):.4f}{newline}'
+            f'Skewness: {stats.skew(data):.4f}{newline}'
             f'Kurtosis: {stats.kurtosis(data):.4f}'
         )
 
@@ -1072,8 +1073,8 @@ class Asset():
             yref = 'paper'
 
             if subplot_idx:
-                xref = f'x{subplot_idx[0] if subplot_idx[0] != 1 else ''} domain'
-                yref = f'y{subplot_idx[0] if subplot_idx[0] != 1 else ''} domain'
+                xref = f'x{subplot_idx[0] if subplot_idx[0] != 1 else ""} domain'
+                yref = f'y{subplot_idx[0] if subplot_idx[0] != 1 else ""} domain'
 
             if show_stats:
                 fig.add_annotation(
@@ -1102,7 +1103,7 @@ class Asset():
 
             if standalone:
                 fig.update_layout(
-                        title=f'{self.ticker} {'Log' if log_rets else ''} Returns Distribution',
+                        title=f'{self.ticker} {"Log" if log_rets else ""} Returns Distribution',
                         xaxis_title='Returns',
                         yaxis_title=f'Count'
                     )
@@ -1115,7 +1116,7 @@ class Asset():
                     col=subplot_idx[1] if subplot_idx else None
                 )
                 fig.update_xaxes(
-                    title_text=f'{self.ticker} {'Log' if log_rets else ''} Returns Distribution', 
+                    title_text=f'{self.ticker} {"Log" if log_rets else ""} Returns Distribution', 
                     row=subplot_idx[0] if subplot_idx else None, 
                     col=subplot_idx[1] if subplot_idx else None
                 )

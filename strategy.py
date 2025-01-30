@@ -168,7 +168,7 @@ class Strategy(ABC):
 
             if standalone:
                 layout['title'] = dict(
-                        text=f'{self.asset.ticker} {name} Backtest ({self.params})',
+                        text=f'{self.asset.ticker} {name} Backtest {self.params}',
                         x=0.5,
                         y=0.95
                     )
@@ -221,7 +221,7 @@ class Strategy(ABC):
                     col=subplot_idx[1] if subplot_idx else None
                 )
                 fig.update_xaxes(
-                    title_text=f'{self.asset.ticker} {name} Backtest ({self.params})', 
+                    title_text=f'{self.asset.ticker} {name} Backtest {self.params}', 
                     row=subplot_idx[0] if subplot_idx else None, 
                     col=subplot_idx[1] if subplot_idx else None
                 )
@@ -322,7 +322,7 @@ class MA_Crossover(Strategy):
     def __get_data(self):
         self.daily = pd.DataFrame(self.asset.daily[['adj_close', 'log_rets']])
         self.five_min = pd.DataFrame(self.asset.five_minute[['adj_close', 'log_rets']])
-        self.params = f'{self.short}/{self.long}'
+        self.params = f'({self.short}/{self.long})'
 
         for i, df in enumerate([self.daily, self.five_min]):
             data = df['adj_close']
@@ -436,7 +436,7 @@ class MA_Crossover(Strategy):
         layout = {}
 
         layout['title'] = dict(
-                text=f'{self.asset.ticker} MA Crossover ({self.params})',
+                text=f'{self.asset.ticker} MA Crossover {self.params}',
                 x=0.5,
                 y=0.95
             )
@@ -563,7 +563,7 @@ class RSI(Strategy):
         self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
         self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
 
-        self.params = f'{self.ub}/{self.lb}'
+        self.params = f'({self.ub}/{self.lb})'
 
         for i, df in enumerate([self.daily, self.five_min]):
             data = df['adj_close']
@@ -714,7 +714,7 @@ class RSI(Strategy):
         layout = {}
 
         layout['title'] = dict(
-                text=f'{self.asset.ticker} RSI Strategy ({self.params})',
+                text=f'{self.asset.ticker} RSI Strategy {self.params}',
                 x=0.5,
                 y=0.95
             )
@@ -842,9 +842,9 @@ class MACD(Strategy):
 
         if weights is not None:
             self.__weights = np.array(weights)
-            self.__weights /= np.sum(weights)
         else:
             self.__weights = np.array([1 / len(self.signal_type)] * len(self.signal_type))
+        self.__weights /= np.sum(self.__weights)
 
         self.__vote_threshold = vote_threshold
 
@@ -856,7 +856,7 @@ class MACD(Strategy):
         self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
         self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
 
-        self.params = f'{self.fast}/{self.slow}/{self.signal}'
+        self.params = f'({self.fast}/{self.slow}/{self.signal})'
 
         for i, df in enumerate([self.daily, self.five_min]):
             data = df['adj_close']
@@ -1025,7 +1025,7 @@ class MACD(Strategy):
         layout = {}
 
         layout['title'] = dict(
-                text=f'{self.asset.ticker} MACD Strategy ({self.params})',
+                text=f'{self.asset.ticker} MACD Strategy {self.params}',
                 x=0.5,
                 y=0.95
             )
@@ -1138,9 +1138,9 @@ class BB(Strategy):
 
         if weights is not None:
             self.__weights = np.array(weights)
-            self.__weights /= np.sum(weights)
         else:
             self.__weights = np.array([1 / len(self.signal_type)] * len(self.signal_type))
+        self.__weights /= np.sum(self.__weights)
 
         self.__vote_threshold = vote_threshold
         self.engine = TAEngine()
@@ -1310,7 +1310,7 @@ class BB(Strategy):
         layout = {}
 
         layout['title'] = dict(
-                text=f'{self.asset.ticker} BB Strategy ({self.params})',
+                text=f'{self.asset.ticker} BB Strategy {self.params}',
                 x=0.5,
                 y=0.95
             )
@@ -1397,6 +1397,188 @@ class BB(Strategy):
 
         return results
 
+
+class CombinedStrategy(Strategy):
+
+    def __init__(self, asset, strategies=None, combine='weighted', weights=None, vote_threshold=0.5):
+        super().__init__(asset)
+
+        if strategies is not None:
+            self.__strategies = strategies
+        else:
+            self.__strategies = [MA_Crossover(asset), RSI(asset), MACD(asset), BB(asset)]
+
+        if weights is not None:
+            self.__weights = np.array(weights)
+        else:
+            self.__weights = np.array([1 / len(self.__strategies)] * len(self.__strategies))
+        self.__weights /= np.sum(self.__weights)
+
+        self.__combine = str(combine)
+        self.__vote_threshold = vote_threshold
+
+        self.__get_data()
+
+    def __get_data(self):
+        self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
+        self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
+        self.params = ''
+
+        for i, df in enumerate([self.daily, self.five_min]):
+            name = 'daily' if i == 0 else 'five_min'
+            signals = pd.DataFrame(index=df.index)
+
+            for i, strat in enumerate(self.strategies):
+                signals[f'{strat.__class__.__name__}_signal_{i}'] = eval(f"strat.{name}['signal']")
+
+            signals.dropna(inplace=True)
+            df['signal'] = sg.vote(signals, self.vote_threshold, self.weights)
+            df.dropna(inplace=True)
+
+            df.rename(columns=dict(log_rets='returns'), inplace=True)
+            df['strategy'] = df['returns'] * df['signal']
+            if i == 0:
+                self.daily = df
+            else:
+                self.five_min = df
+
+    @property
+    def strategies(self):
+        return self.__strategies
+
+    @strategies.setter
+    def strategies(self, value):
+        self.__strategies = list(value)
+        self.__get_data()
+
+    @property
+    def combine(self):
+        return self.__combine
+
+    @combine.setter
+    def combine(self, value):
+        self.__combine = value
+        self.__get_data()
+
+    @property
+    def weights(self):
+        return self.__weights
+
+    @weights.setter
+    def weights(self, value):
+        self.__weights = np.array(value)
+        self.__weights /= np.sum(self.__weights)
+        self.__get_data()
+
+    @property
+    def vote_threshold(self):
+        return self.__vote_threshold
+
+    @vote_threshold.setter
+    def vote_threshold(self, value):
+        self.__vote_threshold = value
+        self.__get_data()
+
+    def plot(self, timeframe='1d', start_date=None, end_date=None,
+             candlestick=True):
+        df = self.daily if timeframe == '1d' else self.five_min
+
+        if start_date is not None:
+            df = df[df.index >= start_date]
+        if end_date is not None:
+            df = df[df.index <= end_date]
+
+        df.dropna(inplace=True)
+
+        fig = go.Figure()
+
+        if candlestick:
+            price = go.Candlestick(
+                        x=df.index,
+                        open=df['open'],
+                        high=df['high'],
+                        low=df['low'],
+                        close=df['close'],
+                        name=f'{self.asset.ticker} OHLC',
+            )
+        else:
+            price = go.Scatter(
+                        x=df.index,
+                        y=df['adj_close'],
+                        line=dict(
+                            color='#2962FF',
+                            width=2,
+                            dash='solid'
+                        ),
+                        name=f'{self.asset.ticker} Price',
+            )
+
+        signal = go.Scatter(
+                    x=df.index,
+                    y=df['signal'],
+                    line=dict(color='green', width=0.8, dash='solid'),
+                    name='Buy/Sell signal',
+                    yaxis='y2'
+        )
+
+        fig.add_traces([price, signal])
+
+        layout = {}
+
+        layout['title'] = dict(
+                text=f'{self.asset.ticker} Combined Strategy {self.params}',
+                x=0.5,
+                y=0.95
+            )
+
+        layout['xaxis'] = dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(128,128,128,0.2)',
+                title=None,
+            )
+
+        layout['yaxis'] = dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(128,128,128,0.2)',
+                title=f'Price ({self.asset.currency})',
+            )
+
+        layout[f'xaxis1_rangeslider_visible'] = False
+
+        layout['height'] = 800
+
+        layout['yaxis2'] = dict(
+                title='Signal',
+                overlaying='y',
+                side='right',
+                range=[-1.1, 1.1],
+                tickmode='array',
+                tickvals=[-1, 1],
+                ticktext=['Sell', 'Buy']
+            )
+
+        layout['legend'] = dict(
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+                orientation="h",  # horizontal layout
+                bgcolor='rgba(255,255,255,0.8)'
+            )
+
+        fig.update_layout(**layout,
+                            paper_bgcolor='white',
+                            plot_bgcolor='rgba(240,240,240,0.95)',
+                            hovermode='x unified')
+
+        fig.show()
+
+        return fig
+
+    def optimize(self):
+        pass
 
 
 

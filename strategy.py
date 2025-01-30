@@ -1083,7 +1083,7 @@ class MACD(Strategy):
         return fig
 
     def optimize(self, inplace=False, timeframe='1d', start_date=None, end_date=None,
-                 slow_range=None, fast_range=None, signal_range=None, threshold_range=None, runs=10):
+                 slow_range=None, fast_range=None, signal_range=None):
 
         if fast_range is None:
             fast_range = np.arange(8, 21, 2)
@@ -1363,8 +1363,39 @@ class BB(Strategy):
         return fig
 
 
-    def optimize(self):
-        pass
+    def optimize(self, inplace=False, timeframe='1d', start_date=None, end_date=None,
+                 window_range=None, num_std_range=None):
+
+        if window_range is None:
+            window_range = np.arange(10, 51, 5)
+        if num_std_range is None:
+            num_std_range = np.arange(1.5, 2.6, 0.1)
+
+        old_params = {'window': self.window, 'num_std': self.num_std}
+
+        results = []
+        for window, num_std in product(window_range, num_std_range):
+
+            self.change_params(window=window, num_std=num_std)
+            backtest_results = self.backtest(plot=False, 
+                             timeframe=timeframe, 
+                             start_date=start_date,
+                             end_date=end_date)
+            results.append((window, num_std, backtest_results['returns'], backtest_results['strategy']))
+
+        results = pd.DataFrame(results, columns=['window', 'num_std', 'hold_returns', 'strategy_returns'])
+        results['net'] = results['strategy_returns'] - results['hold_returns']
+        results = results.sort_values(by='net', ascending=False)
+
+        opt_window = int(results.iloc[0]['window'])
+        opt_num_std = results.iloc[0]['num_std']
+
+        if inplace:
+            self.change_params(window=opt_window, num_std=opt_num_std)
+        else:
+            self.change_params(**old_params)
+
+        return results
 
 
 

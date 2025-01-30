@@ -2092,8 +2092,40 @@ class BB(Strategy):
 
 
 class CombinedStrategy(Strategy):
+    """Meta-strategy that combines multiple technical analysis strategies.
+    
+    Integrates signals from different strategy types (MA, RSI, MACD, BB)
+    into a unified trading strategy. Each component strategy can be individually
+    configured and their signals are combined through weighted voting or consensus.
 
-    def __init__(self, asset, strategies=None, combine='weighted', weights=None, vote_threshold=0.5):
+    This meta-strategy allows for:
+    - Using multiple technical indicators together
+    - Optimizing weights between different strategies
+    - Finding consensus among different trading signals
+    - Reducing false signals through combined confirmation
+
+    Attributes:
+        asset (Asset): Asset to apply the strategy to
+        strategies (list[Strategy]): List of component strategies
+        combine (str): Signal combination method ('weighted' or 'consensus')
+        weights (np.ndarray): Weights for each component strategy
+        vote_threshold (float): Threshold for signal voting
+        params (str): String representation of strategy parameters (empty for combined)
+    """
+
+    def __init__(self, asset: Asset, strategies: Optional[list[Strategy]] = None,
+                 combine: str = 'weighted', weights: Optional[np.ndarray] = None,
+                 vote_threshold: float = 0.5):
+        """Initialize the Combined strategy.
+
+        Args:
+            asset (Asset): Asset to apply the strategy to
+            strategies (list[Strategy], optional): Component strategies. Defaults to
+                [MA_Crossover, RSI, MACD, BB] with default parameters.
+            combine (str, optional): Signal combination method. Defaults to 'weighted'.
+            weights (np.ndarray, optional): Strategy weights. Defaults to equal weights.
+            vote_threshold (float, optional): Voting threshold. Defaults to 0.5.
+        """
         super().__init__(asset)
 
         if strategies is not None:
@@ -2112,7 +2144,14 @@ class CombinedStrategy(Strategy):
 
         self.__get_data()
 
-    def __get_data(self):
+    def __get_data(self) -> None:
+        """Collect signals from all strategies and combine them.
+        
+        Updates both daily and 5-minute dataframes with:
+        - Individual strategy signals
+        - Combined trading signal using weights and threshold
+        - Strategy returns (signal * returns)
+        """
         self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
         self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
         self.params = ''
@@ -2172,7 +2211,18 @@ class CombinedStrategy(Strategy):
         self.__vote_threshold = value
         self.__get_data()
 
-    def change_params(self, strategies=None, combine=None, weights=None, vote_threshold=None):
+    def change_params(self, strategies: Optional[list[Strategy]] = None,
+                     combine: Optional[str] = None,
+                     weights: Optional[np.ndarray] = None,
+                     vote_threshold: Optional[float] = None) -> None:
+        """Update multiple strategy parameters at once.
+
+        Args:
+            strategies (list[Strategy], optional): New component strategies. Defaults to None.
+            combine (str, optional): New combination method. Defaults to None.
+            weights (np.ndarray, optional): New strategy weights. Defaults to None.
+            vote_threshold (float, optional): New voting threshold. Defaults to None.
+        """
         self.__strategies = list(strategies) if strategies is not None else self.strategies
         self.__combine = combine if combine is not None else self.combine
         self.__weights = np.array(weights) if weights is not None else self.weights
@@ -2180,8 +2230,26 @@ class CombinedStrategy(Strategy):
         self.__vote_threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
         self.__get_data()
 
-    def plot(self, timeframe='1d', start_date=None, end_date=None,
-             candlestick=True):
+    def plot(self, timeframe: str = '1d', start_date: Optional[DateLike] = None,
+            end_date: Optional[DateLike] = None, candlestick: bool = True) -> go.Figure:
+        """Create interactive plot of combined strategy signals.
+
+        Creates a plot showing:
+        - Price (candlestick or line)
+        - Combined trading signals
+        
+        Note: Individual strategy indicators are not shown to avoid clutter.
+        Use the plot() method of individual strategies to see their indicators.
+
+        Args:
+            timeframe (str, optional): Data frequency to plot ('1d' or '5m'). Defaults to '1d'.
+            start_date (DateLike, optional): Start date to plot from. Defaults to None.
+            end_date (DateLike, optional): End date to plot to. Defaults to None.
+            candlestick (bool, optional): Use candlestick chart. Defaults to True.
+
+        Returns:
+            go.Figure: Plotly figure with price and combined signals
+        """
         df = self.daily if timeframe == '1d' else self.five_min
 
         if start_date is not None:
@@ -2278,10 +2346,32 @@ class CombinedStrategy(Strategy):
 
         return fig
 
-    def optimize(self, inplace=False, timeframe='1d', start_date=None,
-                 end_date=None, threshold_range=None, runs=10):
+    def optimize(self, inplace: bool = False, timeframe: str = '1d',
+                start_date: Optional[DateLike] = None,
+                end_date: Optional[DateLike] = None,
+                threshold_range: Optional[np.ndarray] = None,
+                runs: int = 10) -> pd.DataFrame:
+        """Optimize strategy weights and voting threshold.
+
+        Uses the optimize_weights() method from the base Strategy class to find
+        optimal weights for combining signals from different strategies.
+        Individual strategies should be optimized separately before combining.
+
+        Args:
+            inplace (bool, optional): Update strategy parameters. Defaults to False.
+            timeframe (str, optional): Data frequency to use ('1d' or '5m'). Defaults to '1d'.
+            start_date (DateLike, optional): Start date for optimization. Defaults to None.
+            end_date (DateLike, optional): End date for optimization. Defaults to None.
+            threshold_range (np.ndarray, optional): Voting thresholds to test. 
+                Defaults to np.arange(0.2, 0.9, 0.1).
+            runs (int, optional): Number of random initializations. Defaults to 10.
+
+        Returns:
+            pd.DataFrame: Results sorted by returns including optimized weights
+                and threshold values
+        """
         return self.optimize_weights(inplace, timeframe, start_date,
-                                     end_date, threshold_range, runs)
+                                  end_date, threshold_range, runs)
 
 
 

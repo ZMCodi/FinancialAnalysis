@@ -23,9 +23,15 @@ from itertools import product
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
+from pandas.core.frame import DataFrame
 import numpy as np
 import signal_gen as sg
 import scipy.optimize as sco
+from assets import Asset
+from typing import Optional
+from datetime import datetime, date
+
+DateLike = str | datetime | date | pd.Timestamp
 
 class TAEngine:
     """Technical Analysis calculation engine with caching capabilities.
@@ -205,21 +211,78 @@ class TAEngine:
 
 
 class Strategy(ABC):
+    """Abstract base class for implementing trading strategies.
+    
+    Provides a framework for creating technical analysis trading strategies with
+    built-in backtesting, visualization, and optimization capabilities. All concrete
+    strategy implementations should inherit from this class and implement the
+    abstract methods.
 
-    def __init__(self, asset):
+    The class handles both daily and 5-minute data timeframes, supports parameter
+    optimization through grid search, and allows strategy visualization through
+    Plotly interactive charts.
+
+    Attributes:
+        asset (Asset): Asset object containing price data and metadata
+        daily (pd.DataFrame): DataFrame containing daily trading signals and returns
+        five_min (pd.DataFrame): DataFrame containing 5-minute trading signals and returns
+        params (str): String representation of strategy parameters
+
+    Abstract Methods:
+        plot: Visualize the strategy and its signals
+        optimize: Optimize strategy parameters using grid search
+    """
+
+    def __init__(self, asset: Asset):
+        """Initialize the strategy for a given asset.
+
+        Args:
+            asset (Asset): Asset object containing price data and metadata
+        """
         self.asset = asset
 
     @abstractmethod
     def plot(self):
+        """Plot strategy indicators and signals.
+        
+        To be implemented by concrete strategy classes.
+        Should create visualization showing strategy indicators and generated signals.
+        """
         pass
 
     @abstractmethod
     def optimize(self):
+        """Optimize strategy parameters.
+        
+        To be implemented by concrete strategy classes.
+        Should perform grid search over parameter space to find optimal settings.
+        """
         pass
 
-    def backtest(self, plot=True, timeframe='1d', start_date=None, end_date=None, 
-            show_signal=True, fig=None, subplot_idx=None):
+    def backtest(self, plot: bool = True, timeframe: str = '1d', 
+                start_date: Optional[DateLike] = None, end_date: Optional[DateLike] = None, 
+                show_signal: bool = True, fig: Optional[go.Figure] = None, 
+                subplot_idx: Optional[tuple[int, int]] = None) -> pd.Series:
+        """Backtest the strategy and optionally plot results.
 
+        Performs backtesting by applying the strategy's signals to historical data
+        and calculating cumulative returns. Can visualize the results using an
+        interactive Plotly chart showing both buy-and-hold and strategy returns.
+
+        Args:
+            plot (bool, optional): Whether to create visualization. Defaults to True.
+            timeframe (str, optional): Data frequency to use ('1d' or '5m'). Defaults to '1d'.
+            start_date (DateLike, optional): Start date for backtest. Defaults to None.
+            end_date (DateLike, optional): End date for backtest. Defaults to None.
+            show_signal (bool, optional): Whether to plot signals. Defaults to True.
+            fig (go.Figure, optional): Existing figure to add plots to. Defaults to None.
+            subplot_idx (tuple[int, int], optional): Subplot position (row, col). Defaults to None.
+
+        Returns:
+            pd.Series: Series with two values:
+                - returns: Buy-and-hold cumulative returns
+                - strategy: Strategy cumulative returns
+        """
         name = self.__class__.__name__
         df = self.daily if timeframe == '1d' else self.five_min
         df.dropna(inplace=True)
@@ -351,9 +414,29 @@ class Strategy(ABC):
 
         return np.exp(df[['returns', 'strategy']].sum())
     
-    def optimize_weights(self, inplace=False, timeframe='1d', start_date=None,
-                            end_date=None, threshold_range=None, runs=10):
+    def optimize_weights(self, inplace: bool = False, timeframe: str = '1d',
+                        start_date: Optional[DateLike] = None, end_date: Optional[DateLike] = None, 
+                        threshold_range: Optional[np.ndarray] = None, runs: int = 10) -> tuple[np.ndarray, float]:
+        """Optimize signal combination weights and voting threshold.
 
+        Uses scipy's SLSQP optimizer to find optimal weights for combining multiple
+        signals from the strategy. Includes regularization to prevent extreme weights
+        and entropy bonus to encourage weight diversity.
+
+        Args:
+            inplace (bool, optional): Whether to update strategy weights. Defaults to False.
+            timeframe (str, optional): Data frequency to use ('1d' or '5m'). Defaults to '1d'.
+            start_date (DateLike, optional): Start date for optimization. Defaults to None.
+            end_date (DateLike, optional): End date for optimization. Defaults to None.
+            threshold_range (np.ndarray, optional): Range of voting thresholds to test. 
+                Defaults to np.arange(0.2, 0.9, 0.1).
+            runs (int, optional): Number of random initializations. Defaults to 10.
+
+        Returns:
+            tuple[np.ndarray, float]: Tuple containing:
+                - Optimal weights for each signal
+                - Optimal voting threshold
+        """
         old_params = {'weights': self.weights, 'vote_threshold': self.vote_threshold}
 
         def objective_function(params):
@@ -415,15 +498,23 @@ class Strategy(ABC):
 
         return opt_weights, float(opt_threshold)
 
-    @property
-    def num_signals_daily(self):
-        return np.sum(np.where(self.daily['signal'].shift(1)
-                               != self.daily['signal'], 1, 0))
+    @property 
+    def num_signals_daily(self) -> int:
+        """Count the number of signal changes in daily data.
+
+        Returns:
+            int: Number of times the trading signal changes from -1 to 1 or vice versa
+        """
+        return np.sum(np.where(self.daily['signal'].shift(1) != self.daily['signal'], 1, 0))
 
     @property
-    def num_signals_five_min(self):
-        return np.sum(np.where(self.five_min['signal'].shift(1)
-                               != self.five_min['signal'], 1, 0))
+    def num_signals_five_min(self) -> int:
+        """Count the number of signal changes in 5-minute data.
+
+        Returns:
+            int: Number of times the trading signal changes from -1 to 1 or vice versa
+        """
+        return np.sum(np.where(self.five_min['signal'].shift(1) != self.five_min['signal'], 1, 0))
 
 
 class MA_Crossover(Strategy):

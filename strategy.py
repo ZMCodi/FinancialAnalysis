@@ -1,3 +1,23 @@
+''' Strategy module for implementing and backtesting technical analysis trading strategies
+
+Key components:
+- TAEngine: Technical analysis calculation engine with caching for efficient computation
+- Strategy base class with plotting, backtesting and optimization capabilities
+- Concrete strategy implementations:
+    - Moving Average Crossover
+    - RSI with multiple signal types
+    - MACD with multiple signal types  
+    - Bollinger Bands with multiple signal types
+    - Combined strategy approach with signal voting
+
+Features:
+- Strategy visualization with interactive Plotly charts
+- Backtesting with customizable parameters and timeframes
+- Parameter optimization via grid search
+- Strategy weights optimization
+- Signal combination through weighted voting
+'''
+
 from abc import ABC, abstractmethod
 from itertools import product
 import plotly.graph_objects as go
@@ -8,14 +28,46 @@ import signal_gen as sg
 import scipy.optimize as sco
 
 class TAEngine:
+    """Technical Analysis calculation engine with caching capabilities.
+    
+    A utility class that provides methods to calculate common technical indicators
+    while caching results to avoid redundant computations. Can be used standalone
+    or as part of strategy implementations.
+
+    The engine caches results using a combination of parameters and data name
+    as keys, allowing efficient reuse when the same calculations are needed
+    multiple times, such as during optimization.
+
+    Attributes:
+        cache (dict): Dictionary storing computed technical indicators
+    """
 
     def __init__(self):
+        """Initialize an empty cache for storing computed indicators."""
         self.cache = {}
 
-    def calculate_ma(self, data, ewm, param_type, param, name):
+    def calculate_ma(self, data: pd.Series, ewm: bool, param_type: str, 
+                    param: float, name: str) -> pd.Series:
+        """Calculate moving average with caching.
+
+        Computes either simple moving average or exponential weighted moving
+        average based on specified parameters. Results are cached using a key
+        that combines all parameters.
+
+        Args:
+            data (pd.Series): Price series to calculate MA for
+            ewm (bool): If True, use exponential weighted moving average.
+                If False, use simple moving average
+            param_type (str): Parameter type for the moving average.
+                Can be 'window', 'span', 'com', 'halflife', or 'alpha'
+            param (float): Value for the specified parameter type
+            name (str): Identifier for the data series, used in cache key
+
+        Returns:
+            pd.Series: Moving average series
+        """
         key = f'ma_{param_type}={param}, {name=}'
         if key not in self.cache:
-
             if ewm:
                 self.cache[key] = data.ewm(**{f'{param_type}': param}).mean()
             else:
@@ -23,10 +75,22 @@ class TAEngine:
 
         return self.cache[key]
 
-    def calculate_rsi(self, data, window, name):
+    def calculate_rsi(self, data: pd.Series, window: int, name: str) -> pd.Series:
+        """Calculate Relative Strength Index (RSI) with caching.
+
+        Computes RSI using the standard formula with exponential weighted
+        moving averages for the gains and losses.
+
+        Args:
+            data (pd.Series): Price series to calculate RSI for
+            window (int): Lookback period for RSI calculation
+            name (str): Identifier for the data series, used in cache key
+
+        Returns:
+            pd.Series: RSI values ranging from 0 to 100
+        """
         key = f'rsi_window={window}, {name=}'
         if key not in self.cache:
-
             delta = data.diff()
             gain = (delta.where(delta > 0, 0)).ewm(alpha=1/window, min_periods=window).mean()
             loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/window, min_periods=window).mean()
@@ -35,7 +99,29 @@ class TAEngine:
 
         return self.cache[key]
 
-    def calculate_macd(self, data, windows, name):
+    def calculate_macd(self, data: pd.Series, windows: list[int], name: str) -> pd.DataFrame:
+        """Calculate Moving Average Convergence Divergence (MACD) with caching.
+
+        Computes MACD using three exponential moving averages:
+        - Fast EMA
+        - Slow EMA 
+        - Signal line EMA on the MACD line
+
+        The function converts the window periods to alpha values and caches
+        the results including the MACD line, signal line, and histogram.
+
+        Args:
+            data (pd.Series): Price series to calculate MACD for
+            windows (list[int]): Three window periods [fast, slow, signal]
+                where fast < slow and signal is for the MACD line
+            name (str): Identifier for the data series, used in cache key
+
+        Returns:
+            pd.DataFrame: DataFrame with columns:
+                - macd: The MACD line (fast EMA - slow EMA)
+                - signal_line: EMA of the MACD line
+                - macd_hist: MACD histogram (signal_line - macd)
+        """
         key = f'macd_{windows=}, {name=}'
         if key not in self.cache:
             results = pd.DataFrame(index=data.index)
@@ -55,10 +141,27 @@ class TAEngine:
 
         return self.cache[key]
 
-    def rolling_std(self, data, ewm, param_type, param, name):
+    def rolling_std(self, data: pd.Series, ewm: bool, param_type: str, 
+                    param: float, name: str) -> pd.Series:
+        """Calculate rolling standard deviation with caching.
+
+        Computes either simple rolling standard deviation or exponential weighted
+        standard deviation based on specified parameters.
+
+        Args:
+            data (pd.Series): Price series to calculate standard deviation for
+            ewm (bool): If True, use exponential weighted standard deviation.
+                If False, use simple rolling standard deviation
+            param_type (str): Parameter type for the calculation.
+                Can be 'window', 'span', 'com', 'halflife', or 'alpha'
+            param (float): Value for the specified parameter type
+            name (str): Identifier for the data series, used in cache key
+
+        Returns:
+            pd.Series: Rolling standard deviation series
+        """
         key = f'rol_std_{param_type}={param}, {name=}'
         if key not in self.cache:
-
             if ewm:
                 self.cache[key] = data.ewm(**{f'{param_type}': param}).std()
             else:
@@ -66,7 +169,27 @@ class TAEngine:
 
         return self.cache[key]
 
-    def calculate_bb(self, data, window, num_std, name):
+    def calculate_bb(self, data: pd.Series, window: int, num_std: float, 
+                    name: str) -> pd.DataFrame:
+        """Calculate Bollinger Bands with caching.
+
+        Computes Bollinger Bands using:
+        - Simple moving average (middle band)
+        - Upper band: SMA + (standard deviation × num_std)
+        - Lower band: SMA - (standard deviation × num_std)
+
+        Args:
+            data (pd.Series): Price series to calculate Bollinger Bands for
+            window (int): Window period for the moving average and standard deviation
+            num_std (float): Number of standard deviations for the bands
+            name (str): Identifier for the data series, used in cache key
+
+        Returns:
+            pd.DataFrame: DataFrame with columns:
+                - sma: Simple moving average (middle band)
+                - bol_up: Upper Bollinger Band
+                - bol_down: Lower Bollinger Band
+        """
         key = f'bb_{window=}_{num_std=}, {name}'
         if key not in self.cache:
             results = pd.DataFrame(index=data.index)

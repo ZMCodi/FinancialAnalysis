@@ -1316,8 +1316,46 @@ class RSI(Strategy):
 
 
 class MACD(Strategy):
+    """Moving Average Convergence Divergence (MACD) trading strategy implementation.
+    
+    Implements a strategy based on MACD signals with multiple signal generation methods:
+    - Traditional signal line crossovers
+    - Price/MACD divergence
+    - Hidden divergence patterns
+    - MACD histogram momentum
+    - Double peak/trough patterns
 
-    def __init__(self, asset, fast=12, slow=26, signal=9, signal_type=None, combine='weighted', weights=None, vote_threshold=0.5):
+    Supports signal combination through weighted voting or consensus mechanisms.
+
+    Attributes:
+        asset (Asset): Asset to apply the strategy to
+        fast (int): Fast EMA period for MACD line
+        slow (int): Slow EMA period for MACD line
+        signal (int): Signal line EMA period
+        signal_type (list[str]): Active signal generation methods
+        combine (str): Signal combination method ('weighted' or 'consensus')
+        weights (np.ndarray): Weights for each signal type
+        vote_threshold (float): Threshold for signal voting
+        engine (TAEngine): Technical analysis calculation engine
+        params (str): String representation of strategy parameters (fast/slow/signal)
+    """
+
+    def __init__(self, asset: Asset, fast: int = 12, slow: int = 26, signal: int = 9,
+                 signal_type: Optional[list[str]] = None, combine: str = 'weighted',
+                 weights: Optional[np.ndarray] = None, vote_threshold: float = 0.5):
+        """Initialize the MACD strategy.
+
+        Args:
+            asset (Asset): Asset to apply the strategy to
+            fast (int, optional): Fast EMA period. Defaults to 12.
+            slow (int, optional): Slow EMA period. Defaults to 26.
+            signal (int, optional): Signal line EMA period. Defaults to 9.
+            signal_type (list[str], optional): Signal types to use. Defaults to
+                ['crossover', 'divergence', 'hidden divergence', 'momentum', 'double peak/trough'].
+            combine (str, optional): Signal combination method. Defaults to 'weighted'.
+            weights (np.ndarray, optional): Signal weights. Defaults to equal weights.
+            vote_threshold (float, optional): Voting threshold. Defaults to 0.5.
+        """
         super().__init__(asset)
         self.__slow = slow
         self.__fast = fast
@@ -1326,7 +1364,8 @@ class MACD(Strategy):
         if signal_type is not None:
             self.signal_type = list(signal_type)
         else:
-            self.signal_type = ['crossover', 'divergence', 'hidden divergence', 'momentum', 'double peak/trough']
+            self.signal_type = ['crossover', 'divergence', 'hidden divergence', 
+                              'momentum', 'double peak/trough']
 
         self.__combine = str(combine)
 
@@ -1337,12 +1376,19 @@ class MACD(Strategy):
         self.__weights /= np.sum(self.__weights)
 
         self.__vote_threshold = vote_threshold
-
         self.engine = TAEngine()
-
         self.__get_data()
 
-    def __get_data(self):
+    def __get_data(self) -> None:
+        """Calculate MACD components and generate trading signals.
+        
+        Updates both daily and 5-minute dataframes with:
+        - MACD line (fast EMA - slow EMA)
+        - Signal line (EMA of MACD line)
+        - MACD histogram
+        - Combined trading signals from multiple signal types
+        - Strategy returns (signal * returns)
+        """
         self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
         self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
 
@@ -1352,11 +1398,13 @@ class MACD(Strategy):
             data = df['adj_close']
             name = 'daily' if i == 0 else 'five_min'
 
-            df[['macd', 'signal_line', 'macd_hist']] = self.engine.calculate_macd(data, [self.fast, self.slow, self.signal], name)
+            df[['macd', 'signal_line', 'macd_hist']] = self.engine.calculate_macd(
+                data, [self.fast, self.slow, self.signal], name)
             df.dropna(inplace=True)
 
-            df['signal'] = sg.macd(df['macd_hist'], df['macd'], df['adj_close'], self.signal_type, 
-                                   self.combine, self.vote_threshold, self.weights)
+            df['signal'] = sg.macd(df['macd_hist'], df['macd'], df['adj_close'],
+                                 self.signal_type, self.combine, self.vote_threshold, 
+                                 self.weights)
 
             df.rename(columns=dict(log_rets='returns'), inplace=True)
             df['strategy'] = df['returns'] * df['signal']
@@ -1421,7 +1469,20 @@ class MACD(Strategy):
         self.__vote_threshold = value
         self.__get_data()
 
-    def change_params(self, fast=None, slow=None, signal=None, combine=None, weights=None, vote_threshold=None):
+    def change_params(self, fast: Optional[int] = None, slow: Optional[int] = None,
+                     signal: Optional[int] = None, combine: Optional[str] = None,
+                     weights: Optional[np.ndarray] = None, 
+                     vote_threshold: Optional[float] = None) -> None:
+        """Update multiple strategy parameters at once.
+
+        Args:
+            fast (int, optional): New fast period. Defaults to None.
+            slow (int, optional): New slow period. Defaults to None.
+            signal (int, optional): New signal period. Defaults to None.
+            combine (str, optional): New combination method. Defaults to None.
+            weights (np.ndarray, optional): New signal weights. Defaults to None.
+            vote_threshold (float, optional): New voting threshold. Defaults to None.
+        """
         self.__fast = fast if fast is not None else self.fast
         self.__slow = slow if slow is not None else self.slow
         self.__signal = signal if signal is not None else self.signal
@@ -1431,9 +1492,25 @@ class MACD(Strategy):
         self.__vote_threshold = vote_threshold if vote_threshold is not None else self.vote_threshold
         self.__get_data()
 
-    def plot(self, timeframe='1d', start_date=None, end_date=None,
-            candlestick=True, show_signal=True):
+    def plot(self, timeframe: str = '1d', start_date: Optional[DateLike] = None,
+            end_date: Optional[DateLike] = None, candlestick: bool = True,
+            show_signal: bool = True) -> go.Figure:
+        """Create interactive plot of MACD components and price with signals.
 
+        Creates a two-panel plot with:
+        - Top panel: Price (candlestick or line) with signals
+        - Bottom panel: MACD line, signal line, and histogram
+
+        Args:
+            timeframe (str, optional): Data frequency to plot ('1d' or '5m'). Defaults to '1d'.
+            start_date (DateLike, optional): Start date to plot from. Defaults to None.
+            end_date (DateLike, optional): End date to plot to. Defaults to None.
+            candlestick (bool, optional): Use candlestick chart. Defaults to True.
+            show_signal (bool, optional): Show trading signals. Defaults to True.
+
+        Returns:
+            go.Figure: Plotly figure with MACD components, price, and signals
+        """
         df = self.daily if timeframe == '1d' else self.five_min
 
         if start_date is not None:
@@ -1572,9 +1649,35 @@ class MACD(Strategy):
 
         return fig
 
-    def optimize(self, inplace=False, timeframe='1d', start_date=None, end_date=None,
-                 slow_range=None, fast_range=None, signal_range=None):
+    def optimize(self, inplace: bool = False, timeframe: str = '1d',
+                start_date: Optional[DateLike] = None, 
+                end_date: Optional[DateLike] = None,
+                slow_range: Optional[np.ndarray] = None,
+                fast_range: Optional[np.ndarray] = None,
+                signal_range: Optional[np.ndarray] = None) -> pd.DataFrame:
+        """Optimize MACD parameters through grid search.
 
+        Tests combinations of parameters to find the best performing settings
+        based on strategy returns vs buy-and-hold returns.
+
+        Args:
+            inplace (bool, optional): Update strategy parameters. Defaults to False.
+            timeframe (str, optional): Data frequency to use ('1d' or '5m'). Defaults to '1d'.
+            start_date (DateLike, optional): Start date for optimization. Defaults to None.
+            end_date (DateLike, optional): End date for optimization. Defaults to None.
+            fast_range (np.ndarray, optional): Fast periods to test. Defaults to [8-20, step=2].
+            slow_range (np.ndarray, optional): Slow periods to test. Defaults to [21-35, step=2].
+            signal_range (np.ndarray, optional): Signal periods to test. Defaults to [5-15, step=2].
+
+        Returns:
+            pd.DataFrame: Results sorted by net returns (strategy - hold), containing:
+                - fast: Fast EMA period
+                - slow: Slow EMA period
+                - signal: Signal line period
+                - hold_returns: Buy-and-hold returns
+                - strategy_returns: Strategy returns
+                - net: Net returns (strategy - hold)
+        """
         if fast_range is None:
             fast_range = np.arange(8, 21, 2)
         if slow_range is None:

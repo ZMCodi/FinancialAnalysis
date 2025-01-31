@@ -1244,8 +1244,10 @@ class RSI(Strategy):
 
         Args:
             strategy_params: Dictionary of parameters needed to initialize the strategy
-            fast: Fast EMA period
-            slow: Slow EMA period
+            ub: upper bound for overbought
+            lb: lower bound for oversold
+            window: lookback window
+            m_rev_bound: rsi bound for mean reversion
             signal: Signal line period
             timeframe: Data frequency to use
             start_date: Start date for backtest

@@ -29,6 +29,7 @@ A Python library for financial data analysis and trading strategy implementation
   - Signal generation and combination methods
   - Weight optimization for combined strategies
   - Performance analysis and visualization
+  - Parallel backtesting and optimization
 
 - **Flexible Plot Creation**
   - Both static (matplotlib) and interactive (plotly) visualizations

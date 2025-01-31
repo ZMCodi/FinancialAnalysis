@@ -2482,10 +2482,9 @@ class CombinedStrategy(Strategy):
 
 # TODO:
 # parrallelize backtest and optimize methods
-# add MACD, ATR and BB strategies
+# add ATR and ADX
 # add transaction costs
 # add risk management
 # add algo to reduce number of trades (e.g. minimum holding period, dead zone, trend filter)
 # add more backtest metrics (e.g. Sharpe ratio, drawdown, max drawdown, win/loss ratio, etc.)
 # add more optimization methods (e.g. genetic algorithm, particle swarm optimization, bayesian, walk-forward, rolling)
-# add documentation (ugh)

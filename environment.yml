@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - anaconda
 dependencies:
-  - python=3.13
+  - python==3.10.16
   - yfinance
   - psycopg
   - plotly
@@ -16,4 +16,5 @@ dependencies:
   - scikit-optimize
   - deap
   - pyswarms
+  - numba
 prefix: /Users/ZMCodi/miniforge3/envs/assets

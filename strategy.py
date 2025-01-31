@@ -285,7 +285,7 @@ class Strategy(ABC):
                 - strategy: Strategy cumulative returns
         """
         name = self.__class__.__name__
-        df = self.daily if timeframe == '1d' else self.five_min
+        df = self.daily.copy() if timeframe == '1d' else self.five_min.copy()
         df.dropna(inplace=True)
 
         if start_date is not None:
@@ -603,8 +603,8 @@ class MA_Crossover(Strategy):
         - Trading signals (-1 for sell, 1 for buy)
         - Strategy returns (signal * returns)
         """
-        self.daily = pd.DataFrame(self.asset.daily[['adj_close', 'log_rets']])
-        self.five_min = pd.DataFrame(self.asset.five_minute[['adj_close', 'log_rets']])
+        self.daily = pd.DataFrame(self.asset.daily[['adj_close', 'log_rets']].copy())
+        self.five_min = pd.DataFrame(self.asset.five_minute[['adj_close', 'log_rets']].copy())
         self.params = f'({self.short}/{self.long})'
 
         for i, df in enumerate([self.daily, self.five_min]):
@@ -675,7 +675,7 @@ class MA_Crossover(Strategy):
         Returns:
             go.Figure: Plotly figure with moving averages and optional signals
         """
-        df = self.daily if timeframe == '1d' else self.five_min
+        df = self.daily.copy() if timeframe == '1d' else self.five_min.copy()
 
         if start_date is not None:
             df = df[df.index >= start_date]
@@ -968,8 +968,8 @@ class RSI(Strategy):
         - Combined trading signals from multiple signal types
         - Strategy returns (signal * returns)
         """
-        self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
-        self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
+        self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']].copy())
+        self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']].copy())
 
         self.params = f'({self.ub}/{self.lb})'
 
@@ -1126,7 +1126,7 @@ class RSI(Strategy):
         Returns:
             go.Figure: Plotly figure with RSI, price, and signals
         """
-        df = self.daily if timeframe == '1d' else self.five_min
+        df = self.daily.copy() if timeframe == '1d' else self.five_min.copy()
 
         if start_date is not None:
             df = df[df.index >= start_date]
@@ -1451,8 +1451,8 @@ class MACD(Strategy):
         - Combined trading signals from multiple signal types
         - Strategy returns (signal * returns)
         """
-        self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
-        self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
+        self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']].copy())
+        self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']].copy())
 
         self.params = f'({self.fast}/{self.slow}/{self.signal})'
 
@@ -1573,7 +1573,7 @@ class MACD(Strategy):
         Returns:
             go.Figure: Plotly figure with MACD components, price, and signals
         """
-        df = self.daily if timeframe == '1d' else self.five_min
+        df = self.daily.copy() if timeframe == '1d' else self.five_min.copy()
 
         if start_date is not None:
             df = df[df.index >= start_date]
@@ -1890,8 +1890,8 @@ class BB(Strategy):
         - Combined trading signals from multiple signal types
         - Strategy returns (signal * returns)
         """
-        self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
-        self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
+        self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']].copy())
+        self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']].copy())
         self.params = f'window={self.window}(±{self.num_std})'
 
         for i, df in enumerate([self.daily, self.five_min]):
@@ -2000,7 +2000,7 @@ class BB(Strategy):
         Returns:
             go.Figure: Plotly figure with Bollinger Bands, price, and signals
         """
-        df = self.daily if timeframe == '1d' else self.five_min
+        df = self.daily.copy() if timeframe == '1d' else self.five_min.copy()
 
         if start_date is not None:
             df = df[df.index >= start_date]
@@ -2257,8 +2257,8 @@ class CombinedStrategy(Strategy):
         - Combined trading signal using weights and threshold
         - Strategy returns (signal * returns)
         """
-        self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
-        self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']])
+        self.daily = pd.DataFrame(self.asset.daily[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']].copy())
+        self.five_min = pd.DataFrame(self.asset.five_minute[['open', 'high', 'low', 'close', 'adj_close', 'log_rets']].copy())
         self.params = ''
 
         for i, df in enumerate([self.daily, self.five_min]):
@@ -2355,7 +2355,7 @@ class CombinedStrategy(Strategy):
         Returns:
             go.Figure: Plotly figure with price and combined signals
         """
-        df = self.daily if timeframe == '1d' else self.five_min
+        df = self.daily.copy() if timeframe == '1d' else self.five_min.copy()
 
         if start_date is not None:
             df = df[df.index >= start_date]

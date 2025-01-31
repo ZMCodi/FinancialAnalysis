@@ -825,16 +825,19 @@ class MA_Crossover(Strategy):
 
         old_params = {'short': self.short, 'long': self.long, 'ewm': self.ewm, 'param_type': self.ptype}
 
-        params = list(product(short_range, long_range))
+        results = []
+        for short, long in product(short_range, long_range):
+            if self.ptype == 'alpha' and short <= long:
+                continue
+            elif short >= long:
+                continue
 
-        if self.ptype == 'alpha':
-            params = [(short, long) for short, long in params if short > long]
-        else:
-            params = [(short, long) for short, long in params if short < long]
-
-        with mp.Pool(mp.cpu_count()) as pool:
-            results = pool.starmap(self._backtest_wrapper, [(short, long, timeframe, start_date, end_date) 
-                                                            for short, long in params])
+            self.change_params(short=short, long=long)
+            backtest_results = self.backtest(plot=False, 
+                                        timeframe=timeframe, 
+                                        start_date=start_date,
+                                        end_date=end_date)
+            results.append((short, long, backtest_results['returns'], backtest_results['strategy']))
 
         results = pd.DataFrame(results, columns=['short', 'long', 'hold_returns', 'strategy_returns'])
         results['net'] = results['strategy_returns'] - results['hold_returns']
@@ -853,16 +856,6 @@ class MA_Crossover(Strategy):
             self.change_params(**old_params)
 
         return results
-
-    def _backtest_wrapper(self, short: float, long: float, timeframe: str, 
-                          start_date: Optional[DateLike], end_date: Optional[DateLike]) -> tuple:
-        """Helper function to perform backtesting for a single parameter combination."""
-        self.change_params(short=short, long=long)
-        backtest_results = self.backtest(plot=False, 
-                                         timeframe=timeframe, 
-                                         start_date=start_date,
-                                         end_date=end_date)
-        return short, long, backtest_results['returns'], backtest_results['strategy']
 
     def optimize_weights(self):
         """Not implemented for MA Crossover strategy.

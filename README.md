@@ -51,7 +51,7 @@ conda env create -f environment.yml
 conda activate [environment-name]
 ```
 
-3. Ensure you have the [financial database](https://github.com/ZMCodi/stock-db) set up
+3. It is recommended that you have the [financial database](https://github.com/ZMCodi/stock-db) set up. But you can still use the Asset class without the database. Just pass in `from_db=False` when instantiating the Asset object.
 
 ## Quick Start
 
@@ -61,6 +61,8 @@ from strategy import MA_Crossover, RSI, MACD, BB, CombinedStrategy
 
 # Initialize asset
 aapl = Asset('AAPL')
+# or if you don't have the database
+aapl = Asset('AAPL', from_db=False)
 
 # Basic Analysis
 aapl.plot_price_history(interactive=True)

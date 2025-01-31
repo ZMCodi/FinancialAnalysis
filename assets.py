@@ -35,14 +35,19 @@ class Asset():
     - prepares data for analysis and plotting
     '''
 
-    def __init__(self, ticker: str) -> None:
+    def __init__(self, ticker: str, from_db: bool = True) -> None:
         '''Instantiates the asset class and gets data from the database
 
         Args:
             ticker (str): ticker string from yfinance
+            from_db (bool): whether to get data from db or yfinance.
+                Defaults to True
         '''
         self.ticker = ticker
-        self.__get_data()
+        if not from_db:
+            self.__download_data()
+        else:
+            self.__get_data()
 
     def __repr__(self) -> str:
         return f'Asset({self.ticker!r})'
@@ -237,6 +242,53 @@ class Asset():
         clean = clean.reset_index()
 
         return clean
+    
+    def __download_data(self) -> None:
+        """Downloads ticker and does not insert to database
+        
+        - Downloads ticker from yfinance
+        - Get currency and asset type
+        - Cleans data
+        """
+        ticker = yf.Ticker(self.ticker)
+
+        # Check valid ticker
+        if ticker.history().empty:
+            print(f'{self.ticker} is an invalid yfinance ticker')
+            return
+
+        self.asset_type = ticker.info['quoteType'].lower()
+        self.currency = ticker.info['currency'].upper()
+
+        daily_data = yf.download(self.ticker, start='2020-01-01')
+        daily_data = daily_data.droplevel(1, axis=1)
+        clean_daily = self.__clean_data(daily_data)
+        clean_daily = clean_daily.rename(columns={'Date': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
+        if 'Adj Close' not in clean_daily.columns:
+            clean_daily['adj_close'] = clean_daily['close']
+        else:
+            clean_daily = clean_daily.rename(columns={'Adj Close': 'adj_close'})
+
+        self.daily = clean_daily.set_index('date').astype(float)
+        self.daily.index = pd.to_datetime(self.daily.index)
+        self.daily = self.daily.sort_index()
+        self.daily['log_rets'] = np.log(self.daily['adj_close'] / self.daily['adj_close'].shift(1))
+        self.daily['rets'] = self.daily['adj_close'].pct_change()
+
+        five_min_data = yf.download(self.ticker, interval='5m')
+        five_min_data = five_min_data.droplevel(1, axis=1)
+        clean_five_min = self.__clean_data(five_min_data)
+        clean_five_min = clean_five_min.rename(columns={'Datetime': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
+        if 'Adj Close' not in clean_five_min.columns:
+            clean_five_min['adj_close'] = clean_five_min['close']
+        else:
+            clean_five_min = clean_five_min.rename(columns={'Adj Close': 'adj_close'})
+
+        self.five_minute = clean_five_min.set_index('date').astype(float)
+        self.five_minute.index = pd.to_datetime(self.five_minute.index)
+        self.five_minute = self.five_minute.sort_index()
+        self.five_minute['log_rets'] = np.log(self.five_minute['adj_close'] / self.five_minute['adj_close'].shift(1))
+        self.five_minute['rets'] = self.five_minute['adj_close'].pct_change()
 
     def __add_new_currency(self, cur: pg.Cursor, conn: pg.Connection, currencies: list, currency: str) -> None:
         """Adds new currency to database to be tracked

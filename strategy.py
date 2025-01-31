@@ -415,23 +415,66 @@ class Strategy(ABC):
 
         return np.exp(df[['returns', 'strategy']].sum())
     
+    @staticmethod
+    def _single_optimization(args):
+        """Helper function to run a single optimization with random initialization."""
+        strategy, n_weights, t_min, t_max, timeframe, start_date, end_date = args
+        
+        # Random initial weights that sum to 1
+        init_weights = np.random.dirichlet(np.ones(n_weights))
+        init_threshold = np.random.uniform(t_min, t_max)
+        init_params = np.concatenate([init_weights, [init_threshold]])
+        
+        def objective_function(params):
+            weights = params[:-1]
+            threshold = params[-1]
+            
+            # Evaluate combined signal with given weights
+            strategy.change_params(weights=weights, vote_threshold=threshold)
+            combined_returns = strategy.backtest(plot=False,
+                                            timeframe=timeframe,
+                                            start_date=start_date,
+                                            end_date=end_date)['strategy']
+            
+            # Add regularization terms
+            diversity_bonus = 0.1 * np.sum(-weights * np.log(weights + 1e-10))
+            extreme_penalty = 0.05 * np.sum(weights ** 2)
+            
+            return -combined_returns - diversity_bonus + extreme_penalty
+        
+        cons = ({
+            'type': 'eq',
+            'fun': lambda x: np.sum(x[:-1]) - 1
+        })
+        
+        bnds = tuple([(0, 1)] * n_weights + [(t_min, t_max)])
+        
+        result = sco.minimize(objective_function, init_params,
+                            method='SLSQP', bounds=bnds,
+                            constraints=cons)
+        
+        return result.fun, result.x
+
     def optimize_weights(self, inplace: bool = False, timeframe: str = '1d',
-                        start_date: Optional[DateLike] = None, end_date: Optional[DateLike] = None, 
-                        threshold_range: Optional[np.ndarray] = None, runs: int = 10) -> tuple[np.ndarray, float]:
-        """Optimize signal combination weights and voting threshold.
-
-        Uses scipy's SLSQP optimizer to find optimal weights for combining multiple
-        signals from the strategy. Includes regularization to prevent extreme weights
-        and entropy bonus to encourage weight diversity.
-
+                        start_date: Optional[DateLike] = None, end_date: Optional[DateLike] = None,
+                        threshold_range: Optional[np.ndarray] = None, 
+                        runs: int = 20) -> tuple[np.ndarray, float]:
+        """Optimize signal combination weights and voting threshold using parallel processing.
+        
+        Uses parallel processing to run multiple optimization attempts with different
+        random initializations simultaneously. Each optimization uses scipy's SLSQP
+        optimizer to find optimal weights for combining multiple signals. Includes regularization 
+        to prevent extreme weights and entropy bonus to encourage weight diversity.
+        
         Args:
             inplace (bool, optional): Whether to update strategy weights. Defaults to False.
             timeframe (str, optional): Data frequency to use ('1d' or '5m'). Defaults to '1d'.
             start_date (DateLike, optional): Start date for optimization. Defaults to None.
             end_date (DateLike, optional): End date for optimization. Defaults to None.
-            threshold_range (np.ndarray, optional): Range of voting thresholds to test. 
+            threshold_range (np.ndarray, optional): Range of voting thresholds to test.
                 Defaults to np.arange(0.2, 0.9, 0.1).
-            runs (int, optional): Number of random initializations. Defaults to 10.
+            runs (int, optional): Number of random initializations. Defaults to 20.
+            n_processes (int, optional): Number of processes to use. Defaults to None (CPU count).
 
         Returns:
             tuple[np.ndarray, float]: Tuple containing:
@@ -440,57 +483,26 @@ class Strategy(ABC):
         """
         old_params = {'weights': self.weights, 'vote_threshold': self.vote_threshold}
 
-        def objective_function(params):
-            weights = params[:-1]
-            threshold = params[-1]
-
-            # Now evaluate combined signal with given weights
-            self.change_params(weights=weights, vote_threshold=threshold)
-            combined_returns = self.backtest(plot=False,
-                                        timeframe=timeframe,
-                                        start_date=start_date,
-                                        end_date=end_date)['strategy']
-
-            # Add regularization terms to prevent extreme weights
-            diversity_bonus = 0.1 * np.sum(-weights * np.log(weights + 1e-10))  # Entropy term
-            extreme_penalty = 0.05 * np.sum(weights ** 2)  # L2 regularization
-
-            return -combined_returns - diversity_bonus + extreme_penalty
-
         n_weights = len(self.weights)
         if threshold_range is None:
             threshold_range = np.arange(0.2, 0.9, 0.1)
 
         t_min, t_max = threshold_range[0], threshold_range[-1]
 
-        cons = ({
-            'type': 'eq',
-            'fun': lambda x: np.sum(x[:-1]) - 1
-        })
+        # Prepare arguments for parallel processing
+        args = [(self, n_weights, t_min, t_max, timeframe, start_date, end_date)
+                for _ in range(runs)]
 
-        bnds = tuple([(0, 1)] * n_weights + [(t_min, t_max)])
+        # Run optimizations in parallel
+        with mp.Pool(mp.cpu_count()) as pool:
+            results = pool.map(self._single_optimization, args)
 
-        # Try multiple random initializations
-        best_result = None
-        best_value = float('inf')
-
-        for _ in range(runs):
-            # Random initial weights that sum to 1
-            init_weights = np.random.dirichlet(np.ones(n_weights))
-            init_threshold = np.random.uniform(t_min, t_max)
-            init_params = np.concatenate([init_weights, [init_threshold]])
-
-            result = sco.minimize(objective_function, init_params,
-                                method='SLSQP', bounds=bnds,
-                                constraints=cons)
-
-            if result.fun < best_value:
-                best_value = result.fun
-                best_result = result
+        # Find best result
+        best_value, best_params = min(results, key=lambda x: x[0])
 
         # Split results
-        opt_weights = best_result.x[:-1] / np.sum(best_result.x[:-1])
-        opt_threshold = best_result.x[-1]
+        opt_weights = best_params[:-1] / np.sum(best_params[:-1])
+        opt_threshold = best_params[-1]
 
         if inplace:
             self.change_params(weights=opt_weights, vote_threshold=opt_threshold)

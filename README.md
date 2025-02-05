@@ -95,6 +95,8 @@ combined.optimize_weights(inplace=True)  # Optimize strategy weights
 
 ```
 
+\**Check demo.ipynb for more detailed usage*
+
 ## API Overview
 
 ### Asset Management

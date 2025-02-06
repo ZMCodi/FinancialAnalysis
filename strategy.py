@@ -2234,6 +2234,9 @@ class CombinedStrategy(Strategy):
         super().__init__(asset)
 
         if strategies is not None:
+            for s in strategies:
+                if s.asset != asset:
+                    raise TypeError("Strategies and asset do not match")
             self.__strategies = strategies
         else:
             self.__strategies = [MA_Crossover(asset), RSI(asset), MACD(asset), BB(asset)]

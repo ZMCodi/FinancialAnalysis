@@ -17,14 +17,15 @@ class Portfolio:
         self.holdings = defaultdict(float)
         self.deposits = 0
         self.currency = 'USD' if currency is None else currency
-        self.cost_basis = defaultdict(float)
+        self.cost_bases = defaultdict(float)
         self.transactions = []
         self.assets = []
+        self.forex_cache = {}
 
         if assets:  # Only process if assets provided
             self.assets.extend([Asset(ast.ticker) for ast in assets])  # store copy of assets
             self.holdings.update({k: v['shares'] for k, v in assets.items()})
-            self.cost_basis.update({k: v['avg_price'] for k, v in assets.items()})
+            self.cost_bases.update({k: v['avg_price'] for k, v in assets.items()})
             self.deposits = sum(ast['shares'] * ast['avg_price'] for ast in assets.values())
 
             if currency is None:
@@ -36,23 +37,29 @@ class Portfolio:
                 if ast.currency != self.currency:
                     self._convert(ast)
 
-
     def _convert(self, asset: Asset):
         f = asset.currency
         t = self.currency
-        with pg.connect(**DB_CONFIG) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT currency_pair, date, close FROM daily_forex WHERE currency_pair = %s", (f'{f}/{t}',))
-                forex = cur.fetchall()
+        key = f'{f}/{t}'
+        if key not in self.forex_cache:
+            with pg.connect(**DB_CONFIG) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT currency_pair, date, close FROM daily_forex WHERE currency_pair = %s", (key,))
+                    forex = cur.fetchall()
 
-        forex = pd.DataFrame(forex, columns=['pair', 'date', 'close']).set_index('date')
-        forex.index = pd.to_datetime(forex.index)
-        forex = forex.sort_index()
-        forex['close'] = forex['close'].astype(float)
+            forex = pd.DataFrame(forex, columns=['pair', 'date', 'close']).set_index('date')
+            forex.index = pd.to_datetime(forex.index)
+            forex = forex.sort_index()
+            forex['close'] = forex['close'].astype(float)
+            self.forex_cache[key] = forex
+
+        forex = self.forex_cache[key]
 
         for df in [asset.daily, asset.five_minute]:
             frx = forex.reindex_like(df, method='ffill')[['close']]
-            df[['open', 'high', 'low', 'close']] = df[['open', 'high', 'low', 'close']].mul(frx['close'], axis=0)
+            df[['open', 'high', 'low', 'close', 'adj_close']] = df[['open', 'high', 'low', 'close', 'adj_close']].mul(frx['close'], axis=0)
+            df['log_rets'] = np.log(df['adj_close'] / df['adj_close'].shift(1))
+            df['rets'] = df['adj_close'].pct_change()
 
     def buy(self, asset, value):
         pass

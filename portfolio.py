@@ -1,9 +1,12 @@
 import numpy as np
 import pandas as pd
 from assets import Asset
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, namedtuple
 import psycopg as pg
 from config import DB_CONFIG
+import datetime
+
+DateLike = str | datetime.datetime | datetime.date | pd.Timestamp
 
 # store how many shares e.g. NVDA 30 shares
 # buy/sell: give date and either shares or price
@@ -12,6 +15,8 @@ from config import DB_CONFIG
 
 
 class Portfolio:
+
+    transaction = namedtuple('transaction', ['type', 'asset', 'shares', 'value', 'date'])
 
     def __init__(self, assets: dict | None = None, currency: str | None = None):
         self.holdings = defaultdict(float)
@@ -61,10 +66,37 @@ class Portfolio:
             df['log_rets'] = np.log(df['adj_close'] / df['adj_close'].shift(1))
             df['rets'] = df['adj_close'].pct_change()
 
-    def buy(self, asset, value):
-        pass
+    def buy(self, asset: Asset, *, shares: float | None = None, value: float | None = None, 
+            date: DateLike | None = None):
+        if date is None:
+            date = datetime.date.today()
+        date = date.strftime('%Y-%m-%d')
 
-    def sell(self, asset, value):
+        if asset not in self.assets:
+            ast = Asset(asset.ticker)  # create copy
+            if ast.currency != self.currency:
+                self._convert(ast)
+            self.assets.append(ast)
+
+        idx = self.assets.index(asset)
+        ast = self.assets[idx]
+        price = ast.daily['close'][ast.daily.index == date]
+
+        if shares is None:
+            # get shares from value / price at date
+            shares = value / price
+
+        if value is None:
+            # get value from shares * price at date
+            value = shares * price
+
+        self.transactions.append(self.transaction('BUY', asset, shares, value, date))
+        old_cost_basis = self.cost_bases[asset]
+        self.holdings[asset] += shares
+        self.cost_bases = (old_cost_basis + value) / self.holdings[asset]
+        self.deposits += value
+
+    def sell(self, asset, shares, price, date=None):
         pass
 
     def rebalance(self):
@@ -95,4 +127,15 @@ class Portfolio:
         pass
 
     def correlation_matrix(self):
+        pass
+
+    def save(self, name):
+        pass
+
+    @classmethod
+    def load(cls, name):
+        pass
+
+    @classmethod
+    def report(cls, name):
         pass

@@ -78,9 +78,10 @@ class Portfolio:
                 self._convert(ast)
             self.assets.append(ast)
 
+        # get price at buy
         idx = self.assets.index(asset)
         ast = self.assets[idx]
-        price = ast.daily['close'][ast.daily.index == date]
+        price = float(ast.daily.loc[date, 'close'])
 
         if shares is None:
             # get shares from value / price at date
@@ -90,14 +91,35 @@ class Portfolio:
             # get value from shares * price at date
             value = shares * price
 
+        # update portfolio values
         self.transactions.append(self.transaction('BUY', asset, shares, value, date))
         old_cost_basis = self.cost_bases[asset]
         self.holdings[asset] += shares
-        self.cost_bases = (old_cost_basis + value) / self.holdings[asset]
+        self.cost_bases[asset] = (old_cost_basis + value) / self.holdings[asset]
         self.deposits += value
 
-    def sell(self, asset, shares, price, date=None):
-        pass
+    def sell(self, asset: Asset, *, shares: float | None = None, value: float | None = None, 
+            date: DateLike | None = None):
+        if date is None:
+            date = datetime.date.today()
+        date = date.strftime('%Y-%m-%d')
+
+        # get price at sell
+        idx = self.assets.index(asset)
+        ast = self.assets[idx]
+        price = float(ast.daily.loc[date, 'close'])
+
+        if shares is None:
+            # get shares from value / price at date
+            shares = value / price
+
+        if value is None:
+            # get value from shares * price at date
+            value = shares * price
+
+        self.transactions.append(self.transaction('SELL', asset, shares, value, date))
+        self.holdings[asset] -= shares
+        self.deposits -= shares * self.cost_bases[asset]
 
     def rebalance(self):
         pass

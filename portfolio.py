@@ -87,7 +87,7 @@ class Portfolio:
 
     def _parse_date(self, date: DateLike | None = None) -> str:
         if date is None:
-            date = datetime.now() - datetime.timedelta(days=1)
+            date = datetime.datetime.now() - datetime.timedelta(days=1)
 
         if isinstance(date, pd.Timestamp):
             # Convert pandas.Timestamp to datetime or date
@@ -110,7 +110,7 @@ class Portfolio:
 
         if asset not in self.assets:
             ast = Asset(asset.ticker)  # create copy
-            if currency != self.currency:
+            if ast.currency != self.currency:
                 self._convert_ast(ast)
             self.assets.append(ast)
 
@@ -165,9 +165,13 @@ class Portfolio:
             price = float(ast.daily.loc[date, 'adj_close'])
             value = shares * price
 
-        self.transactions.append(self.transaction('SELL', asset, shares, value, date))
-        self.holdings[asset] -= shares
-        self.deposits -= shares * self.cost_bases[asset]
+        self.transactions.append(self.transaction('SELL', ast, shares, value, date))
+        self.holdings[ast] -= shares
+        self.deposits -= value
+        if self.holdings[ast] < 1e-8:
+            del self.holdings[ast]
+            del self.cost_bases[ast]
+            del self.assets[idx]
 
     def rebalance(self):
         pass
@@ -177,17 +181,22 @@ class Portfolio:
         pass
 
     def get_pnl(self, date: DateLike | None = None) -> float:
-        if date is None:
-            date = datetime.date.today() - datetime.timedelta(days=1)
-        date = date.strftime('%Y-%m-%d') if type(date) != str else date
+        date = self._parse_date(date)
+        date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
 
-        curr_value = sum(float(asset.daily.loc[date, 'adj_close']) * shares 
-                         for asset, shares in self.holdings.items())
+        curr_value = self.get_value(date)
         return curr_value - self.deposits
 
     @property
     def returns(self):
         pass
+
+    def get_value(self, date: DateLike | None = None) -> float:
+        date = self._parse_date(date)
+        date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
+
+        return sum(float(asset.daily.loc[date, 'adj_close']) * shares 
+                         for asset, shares in self.holdings.items())
 
     @property
     def volatility(self):

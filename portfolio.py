@@ -53,14 +53,20 @@ class Portfolio:
             self.deposits = sum(ast['shares'] * ast['avg_price'] for ast in assets.values())
 
     def _convert_price(self, price: float, currency: str, date: DateLike | None = None) -> float:
-        if date is None:
-            date = datetime.date.today() - datetime.timedelta(days=1)
-        date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
+        date = self._parse_date(date)[:10]
 
         f = currency
         t = self.currency
         key = f'{f}/{t}'
-        rate = self.forex_cache[key].loc[date, 'close']
+        while True:
+            if date in self.forex_cache[key].index:
+                rate = self.forex_cache[key].loc[date, 'close']
+                break
+            else:
+                date_obj = datetime.datetime.strptime(date, '%Y-%m-%d')
+                date_obj -= datetime.timedelta(days=1)
+                date = date_obj.strftime('%Y-%m-%d')
+
         return float(price * rate)
 
     def _convert_ast(self, asset: Asset) -> None:
@@ -89,7 +95,7 @@ class Portfolio:
 
     def _parse_date(self, date: DateLike | None = None) -> str:
         if date is None:
-            date = datetime.datetime.now() - datetime.timedelta(days=2)
+            date = datetime.date.today()
 
         if isinstance(date, pd.Timestamp):
             # Convert pandas.Timestamp to datetime or date
@@ -101,6 +107,17 @@ class Portfolio:
             date = date.strftime('%Y-%m-%d')
 
         return date
+    
+    def _get_price(self,  ast: Asset, date: str) -> float:
+        date = date[:10]
+        while True:
+            if date in ast.daily.index:
+                price = ast.daily.loc[date, 'adj_close']
+                return price
+            else:
+                date_obj = datetime.datetime.strptime(date, '%Y-%m-%d')
+                date_obj -= datetime.timedelta(days=1)
+                date = date_obj.strftime('%Y-%m-%d')
 
     def buy(self, asset: Asset, *, shares: float | None = None, value: float | None = None, 
             date: DateLike | None = None, currency: str | None = None) -> None:
@@ -126,20 +143,20 @@ class Portfolio:
 
         if shares is None:
             # get shares from value / price at date
-            price = float(ast.daily.loc[date, 'adj_close'])
+            price = self._get_price(ast, date)
             shares = value / price
 
         if value is None:
             # get value from shares * price at date
-            price = float(ast.daily.loc[date, 'adj_close'])
+            price = self._get_price(ast, date)
             value = shares * price
 
         # update portfolio values
-        self.transactions.append(self.transaction('BUY', ast, shares, value, date))
+        self.transactions.append(self.transaction('BUY', ast, float(shares), float(value), date))
         old_cost_basis = self.cost_bases[ast] * self.holdings[ast]
-        self.holdings[ast] += shares
+        self.holdings[ast] += float(shares)
         self.cost_bases[ast] = (old_cost_basis + value) / self.holdings[ast]
-        self.deposits += value
+        self.deposits += float(value)
 
     def sell(self, asset: Asset, *, shares: float | None = None, value: float | None = None, 
             date: DateLike | None = None, currency: str | None = None) -> None:
@@ -159,15 +176,15 @@ class Portfolio:
 
         if shares is None:
             # get shares from value / price at date
-            price = float(ast.daily.loc[date, 'adj_close'])
+            price = self._get_price(ast, date)
             shares = value / price
 
         if value is None:
             # get value from shares * price at date
-            price = float(ast.daily.loc[date, 'adj_close'])
+            price = self._get_price(ast, date)
             value = shares * price
 
-        self.transactions.append(self.transaction('SELL', ast, shares, value, date))
+        self.transactions.append(self.transaction('SELL', ast, float(shares), float(value), date))
         self.holdings[ast] -= shares
         self.deposits -= value
         if self.holdings[ast] < 1e-8:
@@ -206,13 +223,6 @@ class Portfolio:
         fig.show()
         return fig
 
-    def holdings_pnl(self, date: DateLike | None = None) -> dict:
-        date = self._parse_date(date)
-        date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
-        value = self.holdings_value(date)
-        return {ast: value[ast] - (self.holdings[ast] * self.cost_bases[ast])
-                for ast in self.assets}
-
     def rebalance(self):
         pass
 
@@ -220,23 +230,13 @@ class Portfolio:
     def stats(self):
         pass
 
-    def get_pnl(self, date: DateLike | None = None) -> float:
-        date = self._parse_date(date)
-        date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
-
-        curr_value = self.get_value(date)
-        return curr_value - self.deposits
-
     @property
     def total_returns(self) -> float:
-
         return self.get_pnl() / self.deposits
 
     @property
     def returns(self):
-        """
-        Calculate portfolio returns considering actual purchase dates
-        """
+
         if not self.transactions:
             return pd.Series()
 
@@ -271,17 +271,28 @@ class Portfolio:
         rets = portfolio_values.pct_change()
         return rets[rets != 0]
 
+    def get_pnl(self, date: DateLike | None = None) -> float:
+        date = self._parse_date(date)[:10]
+
+        curr_value = self.get_value(date)
+        return curr_value - self.deposits
+
     def get_value(self, date: DateLike | None = None) -> float:
         date = self._parse_date(date)
-        date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
 
-        return sum(self.holdings_value().values())
+        return sum(self.holdings_value(date).values())
 
-    def holdings_value(self, date: DateLike | None = None) -> dict:
+    def holdings_pnl(self, date: DateLike | None = None) -> dict:
         date = self._parse_date(date)
         date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
+        value = self.holdings_value(date)
+        return {ast: float(value[ast] - (self.holdings[ast] * self.cost_bases[ast]))
+                for ast in self.assets}
 
-        return {asset: float(asset.daily.loc[date, 'adj_close'] * shares)
+    def holdings_value(self, date: DateLike | None = None) -> dict:
+        date = self._parse_date(date)[:10]
+
+        return {asset: float(self._get_price(asset, date) * shares)
                 for asset, shares in self.holdings.items()}
 
     @property
@@ -331,8 +342,6 @@ class Portfolio:
     @property
     def VaR(self):
         pass
-
-
 
     def correlation_matrix(self):
         pass

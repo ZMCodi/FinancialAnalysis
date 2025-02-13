@@ -88,7 +88,7 @@ class Portfolio:
 
     def _parse_date(self, date: DateLike | None = None) -> str:
         if date is None:
-            date = datetime.datetime.now() - datetime.timedelta(days=1)
+            date = datetime.datetime.now() - datetime.timedelta(days=2)
 
         if isinstance(date, pd.Timestamp):
             # Convert pandas.Timestamp to datetime or date
@@ -228,7 +228,41 @@ class Portfolio:
 
     @property
     def returns(self):
-        pass
+        """
+        Calculate portfolio returns considering actual purchase dates
+        """
+        if not self.transactions:
+            return pd.Series()
+        
+        # Sort transactions by date
+        sorted_transactions = sorted(self.transactions, key=lambda x: x.date)
+        
+        # Create a DataFrame of holdings changes
+        holdings_changes = {}
+        current_holdings = defaultdict(float)
+        
+        for t in sorted_transactions:
+            if t.type == 'BUY':
+                current_holdings[t.asset] += t.shares
+            else:  # SELL
+                current_holdings[t.asset] -= t.shares
+            holdings_changes[t.date] = dict(current_holdings)
+        
+        # Convert to DataFrame and forward fill
+        holdings_df = pd.DataFrame.from_dict(holdings_changes, orient='index').fillna(0)
+        holdings_df.index = pd.to_datetime(holdings_df.index)
+        holdings_df = holdings_df.reindex(
+            pd.date_range(start=holdings_df.index[0], end=pd.Timestamp.today())
+        ).ffill()
+
+        prices = pd.DataFrame(index=holdings_df.index)
+        for ast in holdings_df.columns:
+            prices[ast] = ast.daily['adj_close']
+
+        portfolio_values = holdings_df.mul(prices).sum(axis=1)
+        portfolio_values = portfolio_values[portfolio_values != 0]
+        
+        return portfolio_values.pct_change()
 
     def get_value(self, date: DateLike | None = None) -> float:
         date = self._parse_date(date)

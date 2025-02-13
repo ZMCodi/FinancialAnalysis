@@ -19,7 +19,7 @@ class Portfolio:
 
     transaction = namedtuple('transaction', ['type', 'asset', 'shares', 'value', 'date'])
 
-    def __init__(self, assets: dict | None = None, currency: str | None = None):
+    def __init__(self, assets: dict | None = None, currency: str | None = None, r: float = 0.02):
         self.holdings = defaultdict(float)
         self.deposits = 0
         self.currency = 'USD' if currency is None else currency
@@ -27,6 +27,7 @@ class Portfolio:
         self.transactions = []
         self.assets = []
         self.forex_cache = {}
+        self.r = r
 
         if assets:  # Only process if assets provided
             self.assets.extend([Asset(ast.ticker) for ast in assets.keys()])  # store copy of assets
@@ -285,30 +286,53 @@ class Portfolio:
 
     @property
     def volatility(self):
-        stock_weight = sum(v for k, v in self.holdings_value().items() if k.asset_type != 'cryptocurrency')
-        crypto_weight = sum(v for k, v in self.holdings_value().items() if k.asset_type == 'cryptocurrency')
-        total = stock_weight + crypto_weight
-
-        if total == 0:
+        if not self.weights:
             return 0
 
+        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'cryptocurrency')
+        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'cryptocurrency')
+
         # Weight the annualization factor
-        ann_factor = (stock_weight/total * 252) + (crypto_weight/total * 365)
+        ann_factor = (stock_weight * 252) + (crypto_weight * 365)
 
         daily_vol = self.returns.std()
-        return daily_vol * np.sqrt(ann_factor) * 100
+        return daily_vol * np.sqrt(ann_factor)
+
+    @property
+    def weights(self):
+        return {k: v / sum(self.holdings_value().values()) for k, v in self.holdings_value().items()}
 
     @property
     def sharpe_ratio(self):
-        pass
+
+        if not self.weights:
+            return 0
+
+        # Calculate weighted annualization factor
+        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'cryptocurrency')
+        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'cryptocurrency')
+        ann_factor = (stock_weight * 252) + (crypto_weight * 365)
+
+        # Convert annual risk-free rate to daily using weighted factor
+        daily_rf = self.r / ann_factor
+
+        # Calculate excess returns
+        excess_returns = self.returns - daily_rf
+
+        # Annualize mean excess returns
+        mean_excess_returns = excess_returns.mean() * ann_factor
+
+        vol = self.volatility
+        if vol == 0:
+            return 0
+
+        return mean_excess_returns / vol
 
     @property
     def VaR(self):
         pass
 
-    @property
-    def weights(self):
-        return {k: (v / sum(self.holdings_value().values())) * 100 for k, v in self.holdings_value().items()}
+
 
     def correlation_matrix(self):
         pass

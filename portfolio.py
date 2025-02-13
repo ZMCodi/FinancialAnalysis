@@ -5,6 +5,7 @@ from collections import Counter, defaultdict, namedtuple
 import psycopg as pg
 from config import DB_CONFIG
 import datetime
+import plotly.graph_objects as go
 
 DateLike = str | datetime.datetime | datetime.date | pd.Timestamp
 
@@ -172,6 +173,38 @@ class Portfolio:
             del self.holdings[ast]
             del self.cost_bases[ast]
             del self.assets[idx]
+
+    def pie_chart(self):
+        fig = go.Figure()
+        data = {k.ticker: v for k,v in self.holdings.items()}
+
+        # Calculate percentages
+        total = sum(data.values())
+        percentages = [v/total * 100 for v in data.values()]
+
+        # Create custom text array - empty string for small values
+        text = [f'{p:.1f}%' if p >= 5 else '' for p in percentages]
+
+        fig.add_trace(go.Pie(
+            labels=list(data.keys()),
+            values=list(data.values()),
+            text=text,
+            textinfo='text',
+            hoverinfo='label+percent',
+            textposition='auto',
+        ))
+
+        fig.update_layout(
+            title='Porfolio Holdings',
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="middle",
+                y=0.5,
+                xanchor="right",
+                x=1
+            )
+        )
 
     def rebalance(self):
         pass

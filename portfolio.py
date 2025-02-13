@@ -176,14 +176,10 @@ class Portfolio:
 
     def pie_chart(self):
         fig = go.Figure()
-        data = {k.ticker: v for k,v in self.holdings.items()}
-
-        # Calculate percentages
-        total = sum(data.values())
-        percentages = [v/total * 100 for v in data.values()]
+        data = {k.ticker: v for k, v in self.weights.items()}
 
         # Create custom text array - empty string for small values
-        text = [f'{p:.1f}%' if p >= 5 else '' for p in percentages]
+        text = [f'{p:.1f}%' if p >= 5 else '' for p in data.values()]
 
         fig.add_trace(go.Pie(
             labels=list(data.keys()),
@@ -205,6 +201,16 @@ class Portfolio:
                 x=1
             )
         )
+
+        fig.show()
+        return fig
+
+    def holdings_pnl(self, date: DateLike | None = None) -> dict:
+        date = self._parse_date(date)
+        date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
+
+        return {ast: self.holdings[ast] * self.cost_bases[ast]
+                for ast in self.assets}
 
     def rebalance(self):
         pass
@@ -228,8 +234,14 @@ class Portfolio:
         date = self._parse_date(date)
         date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
 
-        return sum(float(asset.daily.loc[date, 'adj_close']) * shares 
-                         for asset, shares in self.holdings.items())
+        return sum(self.holdings_value().values())
+
+    def holdings_value(self, date: DateLike | None = None) -> dict:
+        date = self._parse_date(date)
+        date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
+
+        return {asset: float(asset.daily.loc[date, 'adj_close'] * shares)
+                for asset, shares in self.holdings.items()}
 
     @property
     def volatility(self):
@@ -242,6 +254,10 @@ class Portfolio:
     @property
     def VaR(self):
         pass
+
+    @property
+    def weights(self):
+        return {k: (v / sum(self.holdings_value().values())) * 100 for k, v in self.holdings_value().items()}
 
     def correlation_matrix(self):
         pass

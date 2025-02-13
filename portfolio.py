@@ -208,8 +208,8 @@ class Portfolio:
     def holdings_pnl(self, date: DateLike | None = None) -> dict:
         date = self._parse_date(date)
         date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
-
-        return {ast: self.holdings[ast] * self.cost_bases[ast]
+        value = self.holdings_value(date)
+        return {ast: value[ast] - (self.holdings[ast] * self.cost_bases[ast])
                 for ast in self.assets}
 
     def rebalance(self):
@@ -227,42 +227,48 @@ class Portfolio:
         return curr_value - self.deposits
 
     @property
+    def total_returns(self) -> float:
+
+        return self.get_pnl() / self.deposits
+
+    @property
     def returns(self):
         """
         Calculate portfolio returns considering actual purchase dates
         """
         if not self.transactions:
             return pd.Series()
-        
+
         # Sort transactions by date
         sorted_transactions = sorted(self.transactions, key=lambda x: x.date)
-        
+
         # Create a DataFrame of holdings changes
         holdings_changes = {}
         current_holdings = defaultdict(float)
-        
+
         for t in sorted_transactions:
             if t.type == 'BUY':
                 current_holdings[t.asset] += t.shares
             else:  # SELL
                 current_holdings[t.asset] -= t.shares
-            holdings_changes[t.date] = dict(current_holdings)
-        
+            holdings_changes[t.date[:10]] = dict(current_holdings)
+
         # Convert to DataFrame and forward fill
         holdings_df = pd.DataFrame.from_dict(holdings_changes, orient='index').fillna(0)
         holdings_df.index = pd.to_datetime(holdings_df.index)
         holdings_df = holdings_df.reindex(
-            pd.date_range(start=holdings_df.index[0], end=pd.Timestamp.today())
+            pd.date_range(start=holdings_df.index[0].date(), end=pd.Timestamp.today())
         ).ffill()
 
         prices = pd.DataFrame(index=holdings_df.index)
         for ast in holdings_df.columns:
             prices[ast] = ast.daily['adj_close']
+        prices = prices.ffill()
 
         portfolio_values = holdings_df.mul(prices).sum(axis=1)
         portfolio_values = portfolio_values[portfolio_values != 0]
-        
-        return portfolio_values.pct_change()
+        rets = portfolio_values.pct_change()
+        return rets[rets != 0]
 
     def get_value(self, date: DateLike | None = None) -> float:
         date = self._parse_date(date)
@@ -279,7 +285,18 @@ class Portfolio:
 
     @property
     def volatility(self):
-        pass
+        stock_weight = sum(v for k, v in self.holdings_value().items() if k.asset_type != 'cryptocurrency')
+        crypto_weight = sum(v for k, v in self.holdings_value().items() if k.asset_type == 'cryptocurrency')
+        total = stock_weight + crypto_weight
+
+        if total == 0:
+            return 0
+
+        # Weight the annualization factor
+        ann_factor = (stock_weight/total * 252) + (crypto_weight/total * 365)
+
+        daily_vol = self.returns.std()
+        return daily_vol * np.sqrt(ann_factor) * 100
 
     @property
     def sharpe_ratio(self):

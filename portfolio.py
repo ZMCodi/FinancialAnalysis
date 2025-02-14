@@ -6,6 +6,7 @@ import psycopg as pg
 from config import DB_CONFIG
 import datetime
 import plotly.graph_objects as go
+from scipy import stats
 
 DateLike = str | datetime.datetime | datetime.date | pd.Timestamp
 
@@ -339,12 +340,42 @@ class Portfolio:
 
         return mean_excess_returns / vol
 
-    @property
-    def VaR(self):
-        pass
+    def VaR(self, confidence: float = 0.95):
+        return float(np.abs(self.returns.quantile(1 - confidence) * self.get_value()))
 
     def correlation_matrix(self):
-        pass
+        df = pd.DataFrame()
+        for ast in self.assets:
+            df[ast.ticker] = ast.daily['rets']
+
+        corr_matrix = df.corr()
+        corr_matrix_masked = np.tril(corr_matrix, k=-1)
+
+        fig = go.Figure(data=go.Heatmap(
+            z=corr_matrix_masked,
+            x=corr_matrix.columns,
+            y=corr_matrix.columns,
+            zmin=-1,
+            zmax=1,
+            colorscale='RdBu',
+            hoverongaps=False
+        ))
+
+        # Update layout
+        fig.update_layout(
+            title='Asset Correlation Matrix',
+            height=800,
+            xaxis=dict(
+                tickangle=-90,
+                side='bottom'
+            ),
+            yaxis=dict(
+                autorange='reversed'
+            )
+        )
+
+        fig.show()
+        return fig
 
     def save(self, name):
         pass

@@ -223,6 +223,67 @@ class Portfolio:
 
         fig.show()
         return fig
+    
+    def returns_dist(self, bins: int = 100, show_stats: bool = True):
+        data = self.returns.dropna()
+        fig = go.Figure()
+
+        # Calculate statistics
+        stats_text = (
+            f'Mean: {np.mean(data):.4f}<br>'
+            f'Std Dev: {np.std(data):.4f}<br>'
+            f'Skewness: {stats.skew(data):.4f}<br>'
+            f'Kurtosis: {stats.kurtosis(data):.4f}'
+        )
+
+        bins = np.linspace(data.min(), data.max(), bins + 1)
+
+        fig.add_trace(
+            go.Histogram(
+                x=data,
+                xbins=dict(
+                    start=bins[0],
+                    end=bins[-1],
+                    size=(bins[1] - bins[0])
+                ),
+                name='Portfolio Returns Distribution'
+            )
+        )
+
+        xref = 'paper'
+        yref = 'paper'
+
+        if show_stats:
+                fig.add_annotation(
+                    x=0.95,
+                    y=0.95,
+                    xref=xref,
+                    yref=yref,
+                    text=stats_text,
+                    showarrow=False,
+                    font=dict(size=10),
+                    align='left',
+                    bgcolor='white',
+                    bordercolor='black',
+                    borderwidth=1,
+                    xanchor='right',
+                    yanchor='top'
+                )
+
+        fig.update_layout(
+                yaxis=dict(
+                    range=[0, None],
+                    rangemode='nonnegative'
+                ),
+                bargap=0.05,
+                title='Portfolio Returns Distribution',
+                xaxis_title='Returns',
+                yaxis_title='Count'
+            )
+        
+        fig.show()
+
+        return fig
 
     def rebalance(self):
         pass

@@ -329,7 +329,7 @@ class Portfolio:
 
     @property
     def total_returns(self) -> float:
-        return self.investment_pnl() / self.net_deposits
+        return np.exp(self.log_returns.sum())
 
     @property
     def trading_returns(self) -> float:
@@ -337,8 +337,8 @@ class Portfolio:
         total_cost_basis = sum(self.holdings[ast] * self.cost_bases[ast] for ast in self.assets)
         return self.trading_pnl() / total_cost_basis if total_cost_basis else 0.0
 
-    @property
-    def returns(self):
+
+    def _returns_helper(self):
 
         if not self.transactions:
             return pd.Series()
@@ -349,13 +349,23 @@ class Portfolio:
         # Create a DataFrame of holdings changes
         holdings_changes = {}
         current_holdings = defaultdict(float)
+        running_deposit = defaultdict(float)
+        cash = defaultdict(float)
 
         for t in sorted_transactions:
             if t.type == 'BUY':
                 current_holdings[t.asset] += t.shares
+                cash[t.date] -= t.value
             elif t.type == 'SELL':
                 current_holdings[t.asset] -= t.shares
+                cash[t.date] += t.value
+            elif t.type == 'DEPOSIT':
+                running_deposit[t.date] += t.value
+                cash[t.date] += t.value
             holdings_changes[t.date[:10]] = dict(current_holdings)
+
+        running_deposit = pd.Series(running_deposit)
+        cash = pd.Series(cash)
 
         # Convert to DataFrame and forward fill
         holdings_df = pd.DataFrame.from_dict(holdings_changes, orient='index').fillna(0)
@@ -364,15 +374,35 @@ class Portfolio:
             pd.date_range(start=holdings_df.index[0].date(), end=pd.Timestamp.today())
         ).ffill()
 
+        running_deposit.index = pd.to_datetime(running_deposit.index)
+        cash.index = pd.to_datetime(cash.index)
+        running_deposit = running_deposit.reindex(holdings_df.index).fillna(0).cumsum()
+        cash = cash.reindex(holdings_df.index).fillna(0).cumsum()
+
+
         prices = pd.DataFrame(index=holdings_df.index)
         for ast in holdings_df.columns:
             prices[ast] = ast.daily['adj_close']
         prices = prices.ffill()
 
         portfolio_values = holdings_df.mul(prices).sum(axis=1)
-        portfolio_values = portfolio_values[portfolio_values != 0]
-        rets = portfolio_values.pct_change()
-        return rets[rets != 0]
+
+        return running_deposit, cash, portfolio_values
+
+    @property
+    def pnls(self):
+        deps, cash, values = self._returns_helper()
+        return values + cash - deps
+
+    @property
+    def returns(self):
+        deps, cash, values = self._returns_helper()
+        return (values + cash - deps) / deps.shift(1)
+
+    @property
+    def log_returns(self):
+        rets = self.returns
+        return np.log1p(rets)
 
     @property
     def realized_pnl(self) -> float:

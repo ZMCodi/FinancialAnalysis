@@ -244,15 +244,10 @@ class Portfolio:
         data = defaultdict(float)
         weights = self.weights
         for ast, weight in weights.items():
-            ast_type = ast.asset_type
-            if ast_type == 'etf':
-                ast_type = 'ETF'
-            else:
-                ast_type = ast_type.capitalize()
-            data[ast_type] += weight
+            data[ast.asset_type] += weight
 
         return self.pie_chart(data, 'Asset Type Exposure')
-    
+
     def sector_exposure(self):
         data = defaultdict(float)
         weights = self.weights
@@ -442,8 +437,8 @@ class Portfolio:
         if not self.weights:
             return 0
 
-        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'cryptocurrency')
-        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'cryptocurrency')
+        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')
+        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'Cryptocurrency')
 
         # Weight the annualization factor
         ann_factor = (stock_weight * 252) + (crypto_weight * 365)
@@ -463,8 +458,8 @@ class Portfolio:
             return 0
 
         # Calculate weighted annualization factor
-        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'cryptocurrency')
-        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'cryptocurrency')
+        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')
+        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'Cryptocurrency')
         ann_factor = (stock_weight * 252) + (crypto_weight * 365)
 
         # Convert annual risk-free rate to daily using weighted factor
@@ -481,6 +476,29 @@ class Portfolio:
             return 0
 
         return mean_excess_returns / vol
+
+    @property
+    def beta(self):
+        market = Asset('SPY')
+        self._convert_ast(market)
+        df = pd.DataFrame()
+        df[market] = market.daily['log_rets']
+        for ast in self.assets:
+            df[ast] = ast.daily['log_rets']
+
+        df = df.dropna().resample('ME').agg('sum')
+        df = np.exp(df)
+
+        betas = {}
+        market_var = df[market].var()
+        for col in df.columns:
+            if col == market:
+                continue
+            beta = df[col].cov(df[market]) / market_var
+            betas[col] = float(beta)
+
+        weights = self.weights
+        return sum(weights[ast] * betas[ast] for ast in self.assets)
 
     def VaR(self, confidence: float = 0.95):
         return float(np.abs(self.returns.quantile(1 - confidence) * self.get_value()))

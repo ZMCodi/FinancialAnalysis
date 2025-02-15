@@ -121,7 +121,9 @@ class Asset():
         exchange = ticker.info['exchange']
         currency = ticker.info['currency'].upper()
         start_date = pd.to_datetime('today').date()
-        asset_type = ticker.info['quoteType'].lower()
+        asset_type = ticker.info['quoteType']
+        if asset_type != 'ETF':
+            asset_type = asset_type.capitalize()
 
         # map exchanges according to pandas market calendar
         exchange_mapping = {
@@ -140,7 +142,7 @@ class Asset():
         try:
             sector = ticker.info['sector']
         except KeyError:
-            if asset_type == 'cryptocurrency':
+            if asset_type == 'Cryptocurrency':
                 sector = 'Cryptocurrency'
             else:
                 sector = None
@@ -257,7 +259,7 @@ class Asset():
             print(f'{self.ticker} is an invalid yfinance ticker')
             return
 
-        self.asset_type = ticker.info['quoteType'].lower()
+        self.asset_type = ticker.info['quoteType'].capitalize()
         self.currency = ticker.info['currency'].upper()
 
         daily_data = yf.download(self.ticker, start='2020-01-01')
@@ -534,7 +536,7 @@ class Asset():
                 if timeframe == '1d':
                     days_back = 365
                 else:
-                    if self.asset_type == 'cryptocurrency':
+                    if self.asset_type == 'Cryptocurrency':
                         days_back = 1
                     else:
                         days_back = 3
@@ -1208,7 +1210,7 @@ class Asset():
 
         if five_min:
             data = self.five_minute
-            if self.asset_type == 'cryptocurrency':
+            if self.asset_type == 'Cryptocurrency':
                 annualization_factor = 252 * 24 * 12  # 24/7 trading
             else:
                 annualization_factor = 252 * 78  # Assuming ~78 5-min periods per day

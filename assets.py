@@ -95,12 +95,9 @@ class Asset():
                 self.five_minute['rets'] = self.five_minute['adj_close'].pct_change()
 
                 # get metadata like asset type and currency
-                cur.execute("SELECT asset_type FROM tickers WHERE ticker = %s", (self.ticker,))
-                self.asset_type = cur.fetchone()[0]
+                cur.execute("SELECT asset_type, currency, sector FROM tickers WHERE ticker = %s", (self.ticker,))
+                self.asset_type, self.currency, self.sector = cur.fetchone()
 
-                cur.execute("SELECT currency FROM tickers WHERE ticker = %s", (self.ticker,))
-                self.currency = cur.fetchone()[0]
-    
     def __insert_new_ticker(self) -> None:
         """Downloads and inserts new ticker to database
         
@@ -143,7 +140,10 @@ class Asset():
         try:
             sector = ticker.info['sector']
         except KeyError:
-            sector = None
+            if asset_type == 'cryptocurrency':
+                sector = 'Cryptocurrency'
+            else:
+                sector = None
 
         print(f'Inserting to DB {ticker=}, {comp_name=}, {exchange=}, {currency=}, {asset_type=}, {market_cap=}, {sector=}')
 

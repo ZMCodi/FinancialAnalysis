@@ -198,27 +198,18 @@ class Portfolio:
             value = shares * price
 
         self.transactions.append(self.transaction('SELL', ast, float(shares), float(value), date))
-    
-        # if ast.ticker in ['CNX1.L', 'V3AB.L', 'VFEG.L']:
-        #     print(f"Selling {shares} shares of {ast}")
-        #     print(f"proportion: {shares/self.holdings[ast]}")
-        #     print(f"holdings: {self.holdings[ast]}")
-        #     print(f"cost_basis: {self.cost_bases[ast]}")
-        #     print(f"reducing deposits by: {float(shares * self.cost_bases[ast])}")
 
         self.holdings[ast] -= float(shares)
         self.cash += float(value)
         if self.holdings[ast] < 1e-8:
             del self.holdings[ast]
-            # del self.cost_bases[ast]
             del self.assets[idx]
 
-    def pie_chart(self):
+    def pie_chart(self, data: dict, title: str):
         fig = go.Figure()
-        data = {k.ticker: v for k, v in self.weights.items()}
 
         # Create custom text array - empty string for small values
-        text = [f'{p:.1f}%' if p >= 5 else '' for p in data.values()]
+        text = [f'{p*100:.1f}%' if p >= 0.05 else '' for p in data.values()]
 
         fig.add_trace(go.Pie(
             labels=list(data.keys()),
@@ -230,7 +221,7 @@ class Portfolio:
         ))
 
         fig.update_layout(
-            title='Porfolio Holdings',
+            title=title,
             showlegend=True,
             legend=dict(
                 orientation="v",
@@ -243,6 +234,35 @@ class Portfolio:
 
         fig.show()
         return fig
+
+    def holdings_chart(self):
+        weights = self.weights
+        data = {k.ticker: v for k, v in weights.items()}
+        return self.pie_chart(data, 'Portfolio Holdings')
+
+    def asset_type_exposure(self):
+        data = defaultdict(float)
+        weights = self.weights
+        for ast, weight in weights.items():
+            ast_type = ast.asset_type
+            if ast_type == 'etf':
+                ast_type = 'ETF'
+            else:
+                ast_type = ast_type.capitalize()
+            data[ast_type] += weight
+
+        return self.pie_chart(data, 'Asset Type Exposure')
+    
+    def sector_exposure(self):
+        data = defaultdict(float)
+        weights = self.weights
+        for ast, weight in weights.items():
+            if ast.sector is not None:
+                data[ast.sector] += weight
+
+        data = {k: v / sum(data.values()) for k, v in data.items()}
+
+        return self.pie_chart(data, 'Sector Exposure')
 
     def returns_dist(self, bins: int = 100, show_stats: bool = True):
         data = self.returns.dropna()
@@ -317,6 +337,12 @@ class Portfolio:
         return self.investment_pnl() / self.net_deposits
 
     @property
+    def trading_returns(self) -> float:
+        """Trading return as a decimal: trading P&L divided by cost basis."""
+        total_cost_basis = sum(self.holdings[ast] * self.cost_bases[ast] for ast in self.assets)
+        return self.trading_pnl() / total_cost_basis if total_cost_basis else 0.0
+
+    @property
     def returns(self):
 
         if not self.transactions:
@@ -332,7 +358,7 @@ class Portfolio:
         for t in sorted_transactions:
             if t.type == 'BUY':
                 current_holdings[t.asset] += t.shares
-            else:  # SELL
+            elif t.type == 'SELL':
                 current_holdings[t.asset] -= t.shares
             holdings_changes[t.date[:10]] = dict(current_holdings)
 
@@ -352,7 +378,7 @@ class Portfolio:
         portfolio_values = portfolio_values[portfolio_values != 0]
         rets = portfolio_values.pct_change()
         return rets[rets != 0]
-    
+
     @property
     def realized_pnl(self) -> float:
         """Profit from sold shares: (sale proceeds) - (cost basis of sold shares)."""
@@ -370,7 +396,7 @@ class Portfolio:
         return sum(self.holdings_pnl().values())
 
     def trading_pnl(self) -> float:
-        """Total P&L: realized + unrealized."""
+        """Total trading P&L: realized + unrealized."""
         return self.realized_pnl + self.unrealized_pnl
 
     @property
@@ -378,22 +404,26 @@ class Portfolio:
         return sum(t.value for t in self.transactions if t.type == 'DEPOSIT')
 
     def investment_pnl(self, date: DateLike | None = None) -> float:
+        """Total portfolio PnL at date"""
         date = self._parse_date(date)[:10]
         curr_value = self.get_value(date)
         return float(curr_value - self.net_deposits)
 
     def get_value(self, date: DateLike | None = None) -> float:
+        """Portfolio market value at date"""
         date = self._parse_date(date)
         return sum(self.holdings_value(date).values()) + self.cash
 
     def holdings_pnl(self, date: DateLike | None = None) -> dict:
+        """PnL in absolute currency of each holdings at date"""
         date = self._parse_date(date)
         date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
         value = self.holdings_value(date)
         return {ast: float(value[ast] - (self.holdings[ast] * self.cost_bases[ast]))
                 for ast in self.assets}
-    
+
     def holdings_returns(self, date: DateLike | None = None) -> dict:
+        """Returns in decimals of each holdings at date"""
         date = self._parse_date(date)
         date = date.strftime('%Y-%m-%d') if type(date) != str else date[:10]
         pnl = self.holdings_pnl(date)
@@ -401,6 +431,7 @@ class Portfolio:
                 for ast in self.assets}
 
     def holdings_value(self, date: DateLike | None = None) -> dict:
+        """Market value of each holdings at date"""
         date = self._parse_date(date)[:10]
 
         return {asset: float(self._get_price(asset, date) * shares)
@@ -422,7 +453,8 @@ class Portfolio:
 
     @property
     def weights(self):
-        return {k: v / sum(self.holdings_value().values()) for k, v in self.holdings_value().items()}
+        holdings_value = self.holdings_value()
+        return {k: v / sum(holdings_value.values()) for k, v in holdings_value.items()}
 
     @property
     def sharpe_ratio(self):

@@ -73,6 +73,8 @@ class Portfolio:
     def _convert_ast(self, asset: Asset) -> None:
         f = asset.currency
         t = self.currency
+        if f == t:
+            return
         key = f'{f}/{t}'
         if key not in self.forex_cache:
             with pg.connect(**DB_CONFIG) as conn:
@@ -92,7 +94,7 @@ class Portfolio:
             frx = forex.reindex_like(df, method='ffill')[['close']]
             df[['open', 'high', 'low', 'close', 'adj_close']] = df[['open', 'high', 'low', 'close', 'adj_close']].mul(frx['close'], axis=0)
             df['log_rets'] = np.log(df['adj_close'] / df['adj_close'].shift(1))
-            df['rets'] = df['adj_close'].pct_change()
+            df['rets'] = df['adj_close'].pct_change(fill_method=None)
 
     def _parse_date(self, date: DateLike | None = None) -> str:
         if date is None:
@@ -392,12 +394,13 @@ class Portfolio:
     @property
     def pnls(self):
         deps, cash, values = self._returns_helper()
-        return values + cash - deps
+        return (values + cash - deps).diff()
 
     @property
     def returns(self):
         deps, cash, values = self._returns_helper()
-        return (values + cash - deps) / deps.shift(1)
+        rets = (values + cash / deps)
+        return rets.pct_change()
 
     @property
     def log_returns(self):
@@ -512,7 +515,8 @@ class Portfolio:
         market = Asset('SPY')
         self._convert_ast(market)
         df = pd.DataFrame()
-        df[market] = market.daily['log_rets']
+
+        df['market'] = market.daily['log_rets']
         for ast in self.assets:
             df[ast] = ast.daily['log_rets']
 
@@ -520,11 +524,11 @@ class Portfolio:
         df = np.exp(df)
 
         betas = {}
-        market_var = df[market].var()
+        market_var = df['market'].var()
         for col in df.columns:
-            if col == market:
+            if str(col) == 'market':
                 continue
-            beta = df[col].cov(df[market]) / market_var
+            beta = df[col].cov(df['market']) / market_var
             betas[col] = float(beta)
 
         weights = self.weights

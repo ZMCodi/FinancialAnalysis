@@ -210,7 +210,7 @@ class Portfolio:
         self.cash += float(value)
         if self.holdings[ast] < 1e-8:
             del self.holdings[ast]
-            del self.cost_bases[ast]
+            # del self.cost_bases[ast]
             del self.assets[idx]
 
     def pie_chart(self):
@@ -243,7 +243,7 @@ class Portfolio:
 
         fig.show()
         return fig
-    
+
     def returns_dist(self, bins: int = 100, show_stats: bool = True):
         data = self.returns.dropna()
         fig = go.Figure()
@@ -312,9 +312,9 @@ class Portfolio:
     def stats(self):
         pass
 
-    # @property
-    # def total_returns(self) -> float:
-    #     return self.get_pnl() / self.deposits
+    @property
+    def total_returns(self) -> float:
+        return self.investment_pnl() / self.net_deposits
 
     @property
     def returns(self):
@@ -354,21 +354,36 @@ class Portfolio:
         return rets[rets != 0]
     
     @property
-    def money_invested(self):
-        return sum(self.holdings[ast] * self.cost_bases[ast] for ast in self.assets)
+    def realized_pnl(self) -> float:
+        """Profit from sold shares: (sale proceeds) - (cost basis of sold shares)."""
+        realized = 0.0
+        for t in self.transactions:
+            if t.type == 'SELL':
+                # Find total cost basis of the sold shares
+                cost_basis = t.shares * self.cost_bases[t.asset]
+                realized += (t.value - cost_basis)
+        return realized
 
-    def get_pnl(self, date: DateLike | None = None) -> float:
+    @property
+    def unrealized_pnl(self) -> float:
+        """Profit from current holdings: (current value) - (cost basis of remaining shares)."""
+        return sum(self.holdings_pnl().values())
+
+    def trading_pnl(self) -> float:
+        """Total P&L: realized + unrealized."""
+        return self.realized_pnl + self.unrealized_pnl
+
+    @property
+    def net_deposits(self):
+        return sum(t.value for t in self.transactions if t.type == 'DEPOSIT')
+
+    def investment_pnl(self, date: DateLike | None = None) -> float:
         date = self._parse_date(date)[:10]
-
         curr_value = self.get_value(date)
-        return float(curr_value - self.deposits)
-
-    def get_pnl_2(self):
-        return float(sum(self.holdings_pnl().values()))
+        return float(curr_value - self.net_deposits)
 
     def get_value(self, date: DateLike | None = None) -> float:
         date = self._parse_date(date)
-
         return sum(self.holdings_value(date).values()) + self.cash
 
     def holdings_pnl(self, date: DateLike | None = None) -> dict:

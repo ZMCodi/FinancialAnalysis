@@ -6,6 +6,8 @@ import psycopg as pg
 from config import DB_CONFIG
 import datetime
 import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 from scipy import stats
 
 DateLike = str | datetime.datetime | datetime.date | pd.Timestamp
@@ -569,6 +571,126 @@ class Portfolio:
         )
 
         fig.show()
+        return fig
+    
+    def risk_decomposition(self):
+        df = pd.DataFrame()
+        port_weights = self.weights
+        weights = []
+        for ast in self.assets:
+            df[ast] = ast.daily['rets']
+            weights.append(port_weights[ast])
+        weights = np.array(weights)
+
+        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')
+        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'Cryptocurrency')
+
+        # Weight the annualization factor
+        ann_factor = (stock_weight * 252) + (crypto_weight * 365)
+
+        cov = df.cov() * ann_factor
+        port_vol = np.sqrt(weights.T @ cov @ weights)
+        marginal_risk = (cov @ weights) / port_vol
+        component_risk = marginal_risk * weights
+        risk_contribution = component_risk / port_vol * 100
+
+        # Create the data as a dictionary first
+        data = {
+            'Weight': weights,
+            'Risk Contribution': risk_contribution,
+            'Marginal Risk': marginal_risk,
+            'Component Risk': component_risk
+        }
+
+        # Create DataFrame all at once with the assets as index
+        risk_decomp = pd.DataFrame(data, index=self.assets)
+        risk_decomp = risk_decomp.sort_values('Weight', ascending=False)
+
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=('Portfolio Weight vs Risk Contribution', 'Marginal Risk'),
+            vertical_spacing=0.2,
+            row_heights=[0.7, 0.3]
+        )
+
+        # Create a color map for assets
+        colors = px.colors.qualitative.Set2
+        asset_colors = {ast.ticker: colors[i % len(colors)] for i, ast in enumerate(risk_decomp.index)}
+
+        # Add traces for top subplot (stacked)
+        for ast in risk_decomp.index:
+            # Add weight bar
+            fig.add_trace(
+                go.Bar(
+                    name=ast.ticker,
+                    x=['Portfolio Weight'],
+                    y=[risk_decomp.loc[ast, 'Weight'] * 100],
+                    marker_color=asset_colors[ast.ticker],
+                    width=0.5,
+                    hovertemplate="<br>".join([
+                        "<b>%{x}</b>",
+                        f"Asset: {ast.ticker}",
+                        "Weight: %{y:.1f}%",
+                        "<extra></extra>"
+                    ])
+                ),
+                row=1, col=1
+            )
+
+            # Add risk contribution bar
+            fig.add_trace(
+                go.Bar(
+                    name=ast.ticker,
+                    x=['Risk Contribution'],
+                    y=[risk_decomp.loc[ast, 'Risk Contribution']],
+                    marker_color=asset_colors[ast.ticker],
+                    showlegend=False,
+                    width=0.5,
+                    hovertemplate="<br>".join([
+                        "<b>%{x}</b>",
+                        f"Asset: {ast.ticker}",
+                        "Contribution: %{y:.1f}%",
+                        "<extra></extra>"
+                    ])
+                ),
+                row=1, col=1
+            )
+
+            # Add marginal risk bar (bottom subplot)
+            fig.add_trace(
+                go.Bar(
+                    name=ast.ticker,
+                    x=[ast.ticker],
+                    y=[risk_decomp.loc[ast, 'Marginal Risk']],
+                    marker_color=asset_colors[ast.ticker],
+                    showlegend=False,
+                    width=0.5,
+                    hovertemplate="<br>".join([
+                        f"Asset: {ast.ticker}",
+                        "Marginal Risk: %{y:.4f}",
+                        "<extra></extra>"
+                    ])
+                ),
+                row=2, col=1
+            )
+
+        # Update layout
+        fig.update_layout(
+            barmode='stack',
+            showlegend=True,
+            height=800,
+            title_text="Portfolio Risk Analysis"
+        )
+
+        # Update y-axes labels
+        fig.update_yaxes(title_text="Percentage (%)", range=[0, 105], row=1, col=1)
+        fig.update_yaxes(title_text="Marginal Risk", row=2, col=1)
+
+        # Update x-axis for bottom subplot
+        fig.update_xaxes(title_text="Assets", row=2, col=1)
+
+        fig.show()
+
         return fig
 
     def save(self, name):

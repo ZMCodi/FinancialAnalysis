@@ -775,7 +775,7 @@ class Asset():
         return fig
 
     def plot_SMA(self, *, window: int = 20, timeframe: str = '1d', start_date: Optional[DateLike] = None, end_date: Optional[DateLike] = None,
-                 resample: Optional[str] = None, interactive: bool = True, r: float = 0., ewm: bool = False, 
+                 interactive: bool = True, r: float = 0., ewm: bool = False, 
                  alpha: Optional[float] = None, halflife: Optional[float] = None, bollinger_bands: bool = False, num_std: float = 2.,  
                  filename: Optional[str] = None, fig: Optional[go.Figure | Figure] = None, 
                  subplot_idx: Optional[int | tuple[int, int]] = None) -> go.Figure | Figure:
@@ -787,8 +787,6 @@ class Asset():
                 Defaults to '1d'.
             start_date (DateLike, optional): Start date for plotting range. Defaults to None.
             end_date (DateLike, optional): End date for plotting range. Defaults to None.
-            resample (str, optional): Resampling frequency in pandas format (e.g., 'B' for business day).
-                Used primarily with 5-min data to remove flat regions during market close. Defaults to None.
             interactive (bool, optional): Whether to create an interactive Plotly graph (True) 
                 or static Matplotlib graph (False). Defaults to True.
             r (float): risk-free rate. Defaults to 0.
@@ -817,29 +815,6 @@ class Asset():
             data = data[data.index >= start_date]
         if end_date is not None:
             data = data[data.index <= end_date]
-        if resample is not None:
-            # aggregate parameters for resampling
-            agg = {
-                    'close_mean': 'last',
-                    'adj_close_mean': 'last',
-                    'close_std': 'mean',
-                    'adj_close_std': 'mean',
-                    'rets_mean': 'sum',
-                    'log_rets_mean': 'sum',
-                    'rets_std': 'mean',
-                    'log_rets_std': 'mean',
-                    'sharpe': 'mean'
-                }
-
-            boll_agg = {
-                'bol_up': 'last',
-                'bol_low': 'last'
-            }
-
-            if bollinger_bands:
-                agg = agg | boll_agg
-
-            data = data.resample(resample).agg(agg)
 
         data = data.dropna()
 
@@ -1193,6 +1168,7 @@ class Asset():
         else:
             data = self.daily
 
+        data = data.drop(columns=['rets'])
         data = data.resample(period).agg({
             'open': 'first',     # First price of the month
             'high': 'max',       # Highest price of the month
@@ -1201,8 +1177,9 @@ class Asset():
             'adj_close': 'last', # Last adjusted price of the month
             'volume': 'sum',     # Total volume for the month
             'log_rets': 'sum',   # Sum of log returns
-            'rets': 'sum'        # Sum of returns
         })
+
+        data['rets'] = data['adj_close'].pct_change()
 
         data = data.dropna()
 

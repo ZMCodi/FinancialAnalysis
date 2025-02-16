@@ -356,7 +356,11 @@ class Portfolio:
         running_deposit = defaultdict(float)
         cash = defaultdict(float)
 
+        has_crypto = False
         for t in sorted_transactions:
+            if type(t.asset) != str:
+                if t.asset.asset_type == 'Cryptocurrency':
+                    has_crypto = True
             if t.type == 'BUY':
                 current_holdings[t.asset] += t.shares
                 cash[t.date] -= t.value
@@ -375,7 +379,7 @@ class Portfolio:
         holdings_df = pd.DataFrame.from_dict(holdings_changes, orient='index').fillna(0)
         holdings_df.index = pd.to_datetime(holdings_df.index)
         holdings_df = holdings_df.reindex(
-            pd.date_range(start=holdings_df.index[0].date(), end=pd.Timestamp.today())
+            pd.date_range(start=holdings_df.index[0].date(), end=pd.Timestamp.today(), freq=('D' if has_crypto else 'B'))
         ).ffill()
 
         running_deposit.index = pd.to_datetime(running_deposit.index)
@@ -482,6 +486,16 @@ class Portfolio:
         return daily_vol * np.sqrt(ann_factor)
 
     @property
+    def annualized_returns(self):
+        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')
+        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'Cryptocurrency')
+
+        # Weight the annualization factor
+        ann_factor = (stock_weight * 252) + (crypto_weight * 365)
+
+        return (1 + self.returns.mean()) ** ann_factor - 1
+
+    @property
     def weights(self):
         holdings_value = self.holdings_value()
         return {k: v / sum(holdings_value.values()) for k, v in holdings_value.items()}
@@ -516,11 +530,15 @@ class Portfolio:
     def beta(self):
         market = Asset('SPY')
         self._convert_ast(market)
-        df = pd.DataFrame()
-
+        df = pd.DataFrame(index=pd.date_range(start='2020-01-01', end=pd.Timestamp.today()))
+        has_crypto = False
         df['market'] = market.daily['log_rets']
         for ast in self.assets:
             df[ast] = ast.daily['log_rets']
+            if ast.asset_type == 'Cryptocurrency':
+                has_crypto = True
+
+        df = df.ffill() if has_crypto else df.dropna()
 
         df = df.dropna().resample('ME').agg('sum')
         df = np.exp(df)
@@ -692,6 +710,165 @@ class Portfolio:
         fig.show()
 
         return fig
+
+    @property
+    def max_drawdown(self):
+        cum_rets = (1 + self.returns).cumprod()
+        max_dd = (cum_rets / cum_rets.cummax() - 1).min()
+        return float(max_dd)
+
+    @property
+    def drawdowns(self):
+        cum_rets = (1 + self.returns).cumprod()
+        drawdown = (cum_rets / cum_rets.cummax() - 1)
+        return drawdown.dropna()
+
+    @property
+    def longest_drawdown_duration(self):
+        drawdown = self.drawdowns
+        drawdown_peaks = drawdown[drawdown == 0]
+        end_idx = pd.Series(drawdown_peaks.index.diff()).idxmax()
+        longest_end = drawdown_peaks.index[end_idx].date()
+        longest_start = drawdown_peaks.index[end_idx - 1].date()
+        longest_duration = (longest_end - longest_start).days
+        return {'start': longest_start.strftime('%d-%m-%Y'), 'end': longest_end.strftime('%d-%m-%Y'), 'duration': longest_duration}
+
+    @property
+    def average_drawdown(self):
+        drawdown = self.drawdowns[self.drawdowns < 0]
+        return float(drawdown.mean())
+    
+    @property
+    def drawdown_ratio(self):
+        return self.max_drawdown / self.average_drawdown
+
+    def time_to_recovery(self, min_duration: int = 3, min_depth: float = 0.05):
+        df = self.drawdown_df
+        return float(df[(df['duration'] >= min_duration) & (-df['depth'] >= np.abs(min_depth))]['time_to_recovery'].mean())
+
+    def average_drawdown_duration(self, min_duration: int = 3, min_depth: float = 0.05):
+        df = self.drawdown_df
+        return float(df[(df['duration'] >= min_duration) & (-df['depth'] >= np.abs(min_depth))]['duration'].mean())
+
+    def drawdown_frequency(self, bins: int = 20):
+        df = self.drawdown_df
+        troughs = df['depth']
+        bins = np.linspace(troughs.min(), troughs.max(), bins + 1)
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Histogram(
+            x=troughs, 
+            xbins=dict(
+                start=bins[0], 
+                end=bins[-1], 
+                size=(bins[1] - bins[0])
+                ),
+            name='Drawdown Frequency'
+            )
+        )
+
+        fig.update_layout(
+            title='Drawdown Frequency',
+            xaxis_title='Drawdown Depth',
+            yaxis_title='Frequency',
+            yaxis=dict(
+                    range=[0, None],
+                    rangemode='nonnegative'
+                ),
+            bargap=0.05
+        )
+        fig.show()
+
+        return troughs
+
+    @property
+    def drawdown_df(self):
+        drawdown_series = self.drawdowns
+        # Initialize variables
+        in_drawdown = False
+        drawdown_start = None
+        bottom_date = None
+        current_bottom = 0
+        recovery_periods = []
+
+        for date, dd in drawdown_series.items():
+            # New drawdown starts
+            if not in_drawdown and dd < 0:
+                in_drawdown = True
+                drawdown_start = date
+                bottom_date = date
+                current_bottom = dd
+
+            # During drawdown
+            elif in_drawdown:
+                # Update bottom if we go lower
+                if dd < current_bottom:
+                    bottom_date = date
+                    current_bottom = dd
+
+                # Recovery found
+                if dd == 0:
+                    recovery_date = date
+                    in_drawdown = False
+                    recovery_periods.append({
+                        'start': drawdown_start,
+                        'bottom': bottom_date,
+                        'recovery': recovery_date,
+                        'depth': current_bottom,
+                        'time_to_recovery': (recovery_date - bottom_date).days,
+                        'duration': (recovery_date - drawdown_start).days
+                    })
+
+        # If still in drawdown at end of series
+        if in_drawdown:
+            recovery_periods.append({
+                'start': drawdown_start,
+                'bottom': bottom_date,
+                'recovery': None,
+                'depth': current_bottom,
+                'time_to_recovery': None,
+                'duration': (date - drawdown_start).days
+            })
+
+        return pd.DataFrame(recovery_periods)
+    
+    @property
+    def calmar_ratio(self):
+        return float(self.annualized_returns / np.abs(self.max_drawdown))
+    
+    @property
+    def drawdown_metrics(self):
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=self.drawdowns.index,
+                y=self.drawdowns,
+                mode='lines',
+                name='Drawdown'
+            )
+        )
+
+        fig.update_layout(
+            title='Drawdown',
+            xaxis_title='Date',
+            yaxis_title='Drawdown',
+            showlegend=False
+        )
+
+        fig.show()
+
+        metrics = {
+            'max_drawdown': self.max_drawdown,
+            'average_drawdown': self.average_drawdown,
+            'drawdown_ratio': self.drawdown_ratio,
+            'longest_drawdown_duration': self.longest_drawdown_duration,
+            'time_to_recovery': self.time_to_recovery(),
+            'average_drawdown_duration': self.average_drawdown_duration(),
+            'calmar_ratio': self.calmar_ratio
+        }
+
+        return metrics
 
     def save(self, name):
         pass

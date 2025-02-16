@@ -175,7 +175,7 @@ class Portfolio:
         if self.cash - value < 0:
             raise ValueError('Not enough money')
 
-        self.transactions.append(self.transaction('BUY', ast, float(shares), float(value), 0., date))
+        self.transactions.append(self.transaction('BUY', ast, round(float(shares), 5), round(float(value), 2), 0., date))
         old_cost_basis = self.cost_bases[ast] * self.holdings[ast]
         self.holdings[ast] += float(shares)
         self.cost_bases[ast] = (old_cost_basis + value) / self.holdings[ast]
@@ -208,7 +208,7 @@ class Portfolio:
             value = shares * price
 
         profit = (value - (self.cost_bases[ast] * shares))
-        self.transactions.append(self.transaction('SELL', ast, float(shares), float(value), float(profit), date))
+        self.transactions.append(self.transaction('SELL', ast, round(float(shares), 5), round(float(value), 2), float(profit), date))
 
         self.holdings[ast] -= float(shares)
         self.cash += float(value)
@@ -1079,7 +1079,54 @@ class Portfolio:
 
     @classmethod
     def load(cls, name):
-        pass
+        with pg.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT state FROM portfolio_states
+                    WHERE name = %s
+                """, (name,))
+                state = cur.fetchone()[0]
+
+                cur.execute("""
+                    SELECT * FROM portfolio_transactions
+                    WHERE name = %s
+                """, (name,))
+                transactions = cur.fetchall()
+
+        port = cls(currency=state['currency'], r=state['r'])
+
+        # update transactions
+        t_list = []
+        for t in transactions:
+            ast = t[2] if t[2] == 'Cash' else Asset(t[2])
+            t = cls.transaction(t[1], ast, t[3], t[4], t[5], t[6])
+            t_list.append(t)
+
+        port.transactions = t_list
+
+        # update state
+        port.cash = state['cash']
+
+        port.assets = [Asset(ast) for ast in state['assets']]
+        for ast in port.assets:
+            if ast.currency != port.currency:
+                port._convert_ast(ast)
+
+        holdings = state['holdings']
+        port.holdings.update({ast: holdings[ast.ticker] for ast in port.assets})
+
+        tickers = [ast.ticker for ast in port.assets]
+        for ticker in state['cost_bases']:
+            if ticker in tickers:
+                idx = tickers.index(ticker)
+                port.cost_bases[port.assets[idx]] = state['cost_bases'][ticker]
+            else:
+                ast = Asset(ticker)
+                if ast.currency != port.currency:
+                    port._convert_ast(ast)
+                port.cost_bases[ast] = state['cost_bases'][ticker]
+
+        return port
 
     @classmethod
     def report(cls, name):

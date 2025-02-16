@@ -351,14 +351,46 @@ class Portfolio:
                 new_port.sell(ast, shares=new_port.holdings[ast], currency=self.currency)
             else:
                 t_value = target_weights[ast] * total_value
-                if t_value < values[ast]:
+                if t_value < values[ast] and values[ast] - t_value > 1e-2:
                     new_port.sell(ast, value=values[ast] - t_value, currency=self.currency)
-                elif t_value > values[ast]:
+                elif t_value > values[ast] and t_value - values[ast] > 1e-2:
                     new_port.buy(ast, value=t_value - values[ast], currency=self.currency)
-            print(new_port.cash)
 
         if not inplace:
             return new_port.transactions
+
+    def from_transactions(self, transactions: list[transaction]):
+        for t in transactions:
+            if t.type == 'DEPOSIT':
+                self.deposit(t.value, currency=self.currency, date=t.date)
+            elif t.type == 'BUY':
+                self.buy(t.asset, shares=t.shares, value=t.value, date=t.date, currency=self.currency)
+            elif t.type == 'SELL':
+                self.sell(t.asset, shares=t.shares, value=t.value, date=t.date, currency=self.currency)
+
+    def from_vanguard(self, filename: str):
+        port_df = pd.read_csv(filename)
+        port_df = port_df[['Action', 'Time', 'Ticker', 'No. of shares', 'Currency (Price / share)', 'Total']]
+        port_df.rename(columns={'Action': 'action', 'Time': 'time', 'Ticker': 'ticker', 'No. of shares': 'shares', 'Currency (Price / share)': 'currency', 'Total': 'value'}, inplace=True)
+        port_df['time'] = port_df['time'].apply(lambda x: x[:19])
+        port_df['time'] = pd.to_datetime(port_df['time'])
+        port_df.loc[port_df['currency'] == 'GBX', 'currency'] = 'GBP'
+        def clean_action(x):
+            if x == 'Deposit':
+                return x.lower()
+            else:
+                return x[7:]
+        port_df['action'] = port_df['action'].apply(lambda x: clean_action(x))
+        port_df['time'] = port_df['time'].dt.date
+        port_df.loc[port_df['currency'] == 'GBP', 'ticker'] += '.L'
+
+        for _, row in port_df.iterrows():
+            if row['action'] == 'buy':
+                self.buy(Asset(row['ticker']), shares=row['shares'], value=row['value'], date=row['time'], currency=self.currency)
+            elif row['action'] == 'sell':
+                self.sell(Asset(row['ticker']), shares=row['shares'], value=row['value'], date=row['time'], currency=self.currency)
+            elif row['action'] == 'deposit':
+                self.deposit(row['value'], currency=self.currency, date=row['time'])
 
     @property
     def stats(self):

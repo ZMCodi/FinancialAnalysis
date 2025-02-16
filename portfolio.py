@@ -137,7 +137,7 @@ class Portfolio:
             value = self._convert_price(value, currency, date)
 
         self.transactions.append(self.transaction('DEPOSIT', 'Cash', 0.0, float(value), 0., date))
-        self.cash += value
+        self.cash += float(value)
 
     def buy(self, asset: Asset, *, shares: float | None = None, value: float | None = None, 
             date: DateLike | None = None, currency: str | None = None) -> None:
@@ -179,7 +179,7 @@ class Portfolio:
         old_cost_basis = self.cost_bases[ast] * self.holdings[ast]
         self.holdings[ast] += float(shares)
         self.cost_bases[ast] = (old_cost_basis + value) / self.holdings[ast]
-        self.cash -= value
+        self.cash -= float(value)
 
     def sell(self, asset: Asset, *, shares: float | None = None, value: float | None = None, 
             date: DateLike | None = None, currency: str | None = None) -> None:
@@ -402,68 +402,73 @@ class Portfolio:
     @property
     def stats(self):
         """Calculate and return comprehensive portfolio statistics."""
+        def round_number(value, is_currency=False):
+            """Helper function to round numbers consistently"""
+            if pd.isna(value):
+                return value
+            decimals = 2 if is_currency else 3
+            return round(float(value), decimals)
 
         # Returns & Performance Metrics
         performance_metrics = {
-            'current_value': self.get_value(),
-            'total_return': self.total_returns,
-            'trading_return': self.trading_returns,
-            'annualized_return': self.annualized_returns,
+            'total_return': round_number(self.total_returns),
+            'trading_return': round_number(self.trading_returns),
+            'annualized_return': round_number(self.annualized_returns),
             'daily_returns': {
-                'mean': float(self.returns.mean()),
-                'median': float(self.returns.median()),
-                'std': float(self.returns.std()),
-                'skewness': float(stats.skew(self.returns.dropna())),
-                'kurtosis': float(stats.kurtosis(self.returns.dropna())),
+                'mean': round_number(self.returns.mean()),
+                'median': round_number(self.returns.median()),
+                'std': round_number(self.returns.std()),
+                'skewness': round_number(stats.skew(self.returns.dropna())),
+                'kurtosis': round_number(stats.kurtosis(self.returns.dropna())),
             },
-            'best_day': float(self.returns.max()),
-            'worst_day': float(self.returns.min()),
-            'positive_days': float((self.returns > 0).sum() / len(self.returns)),
+            'best_day': round_number(self.returns.max()),
+            'worst_day': round_number(self.returns.min()),
+            'positive_days': round_number((self.returns > 0).sum() / len(self.returns)),
         }
 
         # Risk Metrics
         risk_metrics = {
-            'volatility': self.volatility,
-            'sharpe_ratio': self.sharpe_ratio,
-            'sortino_ratio': self.sortino_ratio,
-            'beta': self.beta,
-            'value_at_risk': self.VaR(),
-            'tracking_error': self.tracking_error,
-            'information_ratio': self.information_ratio,
-            'treynor_ratio': self.treynor_ratio,
+            'volatility': round_number(self.volatility),
+            'sharpe_ratio': round_number(self.sharpe_ratio),
+            'sortino_ratio': round_number(self.sortino_ratio),
+            'beta': round_number(self.beta),
+            'value_at_risk': round_number(self.VaR(), True),
+            'tracking_error': round_number(self.tracking_error),
+            'information_ratio': round_number(self.information_ratio),
+            'treynor_ratio': round_number(self.treynor_ratio),
         }
 
-        # Drawdown Metrics
+        # Drawdown Metrics 
         drawdown_metrics = {
-            'max_drawdown': self.max_drawdown,
-            'average_drawdown': self.average_drawdown,
-            'drawdown_ratio': self.drawdown_ratio,
-            'calmar_ratio': self.calmar_ratio,
+            'max_drawdown': round_number(self.max_drawdown),
+            'average_drawdown': round_number(self.average_drawdown),
+            'drawdown_ratio': round_number(self.drawdown_ratio),
+            'calmar_ratio': round_number(self.calmar_ratio),
             'longest_drawdown': self.longest_drawdown_duration,
-            'time_to_recovery': self.time_to_recovery(),
-            'avg_drawdown_duration': self.average_drawdown_duration(),
+            'time_to_recovery': round_number(self.time_to_recovery()),
+            'avg_drawdown_duration': round_number(self.average_drawdown_duration()),
         }
 
         # Position & Exposure Metrics
         position_metrics = {
-            'total_value': self.get_value(),
-            'cash': self.cash,
-            'cash_weight': self.cash / self.get_value(),
+            'total_value': round_number(self.get_value(), True),
+            'cash': round_number(self.cash, True),
+            'cash_weight': round_number(self.cash / self.get_value()),
             'number_of_positions': len(self.holdings),
-            'largest_position': max(self.weights.values()) if self.weights else 0,
-            'smallest_position': min(self.weights.values()) if self.weights else 0,
-            'concentration': sum(w*w for w in self.weights.values()),  # Herfindahl-Hirschman Index
+            'largest_position': round_number(max(self.weights.values()) if self.weights else 0),
+            'smallest_position': round_number(min(self.weights.values()) if self.weights else 0),
+            'concentration': round_number(sum(w*w for w in self.weights.values())),
         }
 
         # Trading Activity Metrics
         activity_metrics = {
-            'realized_pnl': self.realized_pnl,
-            'unrealized_pnl': self.unrealized_pnl,
-            'total_pnl': self.trading_pnl(),
-            'investment_pnl': self.investment_pnl(),
-            'net_deposits': self.net_deposits,
+            'realized_pnl': round_number(self.realized_pnl, True),
+            'unrealized_pnl': round_number(self.unrealized_pnl, True),
+            'total_pnl': round_number(self.trading_pnl(), True),
+            'investment_pnl': round_number(self.investment_pnl(), True),
+            'net_deposits': round_number(self.net_deposits, True),
             'number_of_trades': len([t for t in self.transactions if t.type in ['BUY', 'SELL']]),
-            'win_rate': self.win_rate,
+            'win_rate': round_number(self.win_rate),
         }
 
         return {
@@ -473,7 +478,7 @@ class Portfolio:
             'position': position_metrics,
             'activity': activity_metrics,
         }
-    
+
     @property
     def information_ratio(self):
         market = self.market.daily['rets'].reindex(self.returns.index)
@@ -501,14 +506,13 @@ class Portfolio:
 
     @property
     def total_returns(self) -> float:
-        return float(np.exp(self.log_returns.sum()))
+        return float(np.exp(self.log_returns.sum() - 1))
 
     @property
     def trading_returns(self) -> float:
         """Trading return as a decimal: trading P&L divided by cost basis."""
         total_cost_basis = sum(self.holdings[ast] * self.cost_bases[ast] for ast in self.assets)
-        return self.trading_pnl() / total_cost_basis if total_cost_basis else 0.0
-
+        return float(self.trading_pnl() / total_cost_basis) if total_cost_basis else 0.0
 
     def _returns_helper(self):
 
@@ -573,7 +577,7 @@ class Portfolio:
     @property
     def returns(self):
         deps, cash, values = self._returns_helper()
-        rets = (values + cash / deps)
+        rets = (values + cash) / deps
         return rets.pct_change().dropna()
 
     @property
@@ -608,7 +612,7 @@ class Portfolio:
     def get_value(self, date: DateLike | None = None) -> float:
         """Portfolio market value at date"""
         date = self._parse_date(date)
-        return sum(self.holdings_value(date).values()) + self.cash
+        return float(sum(self.holdings_value(date).values()) + self.cash)
 
     def holdings_pnl(self, date: DateLike | None = None) -> dict:
         """PnL in absolute currency of each holdings at date"""
@@ -637,7 +641,8 @@ class Portfolio:
     def ann_factor(self):
         stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')
         crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'Cryptocurrency')
-        return (stock_weight * 252) + (crypto_weight * 365)
+        ann_factor = (stock_weight * 252) + (crypto_weight * 365)
+        return ann_factor if ann_factor else 252
 
     @property
     def volatility(self):

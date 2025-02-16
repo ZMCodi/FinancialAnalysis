@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 from scipy import stats
+import json
 
 DateLike = str | datetime.datetime | datetime.date | pd.Timestamp
 
@@ -24,7 +25,6 @@ class Portfolio:
 
     def __init__(self, assets: dict | None = None, currency: str | None = None, r: float = 0.02):
         self.holdings = defaultdict(float)
-        self.deposits = 0
         self.currency = 'USD' if currency is None else currency
         self.cost_bases = defaultdict(float)
         self.transactions = []
@@ -1048,8 +1048,34 @@ class Portfolio:
 
         return metrics
 
-    def save(self, name):
-        pass
+    def save(self, name: str):
+        state = {
+            'holdings': {k.ticker: v for k, v in self.holdings.items()},
+            'cost_bases': {k.ticker: v for k, v in self.cost_bases.items()},
+            'assets': [ast.ticker for ast in self.assets],
+            'cash': self.cash,
+            'r': self.r,
+            'currency': self.currency,
+        }
+
+        with pg.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO portfolio_states (name, state)
+                    VALUES (%s, %s)
+                    ON CONFLICT (name) 
+                    DO UPDATE SET state = EXCLUDED.state
+                """, (name, json.dumps(state)))
+
+                for t in self.transactions:
+                    ticker = t.asset if type(t.asset) == str else t.asset.ticker
+                    cur.execute("""
+                        INSERT INTO portfolio_transactions 
+                        (name, type, asset, shares, value, profit, date)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (name, type, asset, value, date) 
+                        DO NOTHING
+                    """, (name, t.type, ticker, t.shares, t.value, t.profit, t.date))
 
     @classmethod
     def load(cls, name):

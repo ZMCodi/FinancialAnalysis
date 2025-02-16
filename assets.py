@@ -129,7 +129,9 @@ class Asset():
         exchange_mapping = {
             'NYQ': 'NYSE',
             'NMS': 'NASDAQ',
-            'NGM': 'NASDAQ'
+            'NGM': 'NASDAQ',
+            'PCX': 'NYSE',
+            'PNK': 'stock',
         }
         exchange = exchange_mapping.get(exchange, exchange)
 

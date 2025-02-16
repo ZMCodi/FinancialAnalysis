@@ -496,6 +496,36 @@ class Portfolio:
         return (1 + self.returns.mean()) ** ann_factor - 1
 
     @property
+    def downside_deviation(self):
+        returns = self.returns
+        return np.sqrt(np.mean(np.minimum(returns, 0) ** 2))
+
+    @property
+    def sortino_ratio(self):
+        if not self.weights:
+            return 0
+
+        downside_deviation = self.downside_deviation
+        if downside_deviation == 0:
+            return 0
+
+        # Calculate weighted annualization factor
+        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')
+        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'Cryptocurrency')
+        ann_factor = (stock_weight * 252) + (crypto_weight * 365)
+
+        # Convert annual risk-free rate to daily using weighted factor
+        daily_rf = self.r / ann_factor
+
+        # Calculate excess returns
+        excess_returns = self.returns - daily_rf
+
+        # Annualize mean excess returns
+        mean_excess_returns = excess_returns.mean() * ann_factor
+
+        return mean_excess_returns / downside_deviation
+
+    @property
     def weights(self):
         holdings_value = self.holdings_value()
         return {k: v / sum(holdings_value.values()) for k, v in holdings_value.items()}
@@ -590,7 +620,7 @@ class Portfolio:
 
         fig.show()
         return fig
-    
+
     def risk_decomposition(self):
         df = pd.DataFrame()
         port_weights = self.weights

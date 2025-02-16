@@ -21,7 +21,7 @@ DateLike = str | datetime.datetime | datetime.date | pd.Timestamp
 
 class Portfolio:
 
-    transaction = namedtuple('transaction', ['type', 'asset', 'shares', 'value', 'profit', 'date'])
+    transaction = namedtuple('transaction', ['type', 'asset', 'shares', 'value', 'profit', 'date', 'id'])
 
     def __init__(self, assets: dict | None = None, currency: str | None = None, r: float = 0.02):
         self.holdings = defaultdict(float)
@@ -32,6 +32,7 @@ class Portfolio:
         self.forex_cache = {}
         self.r = r
         self.cash = 0.0
+        self.id = 0
 
         if assets:  # Only process if assets provided
             self.assets.extend([Asset(ast.ticker) for ast in assets.keys()])  # store copy of assets
@@ -138,8 +139,9 @@ class Portfolio:
         if currency != self.currency:
             value = self._convert_price(value, currency, date)
 
-        self.transactions.append(self.transaction('DEPOSIT', 'Cash', 0.0, float(value), 0., date))
+        self.transactions.append(self.transaction('DEPOSIT', 'Cash', 0.0, float(value), 0., date, self.id))
         self.cash += float(value)
+        self.id += 1
 
     def buy(self, asset: Asset, *, shares: float | None = None, value: float | None = None, 
             date: DateLike | None = None, currency: str | None = None) -> None:
@@ -177,11 +179,12 @@ class Portfolio:
         if self.cash - value < 0:
             raise ValueError('Not enough money')
 
-        self.transactions.append(self.transaction('BUY', ast, round(float(shares), 5), round(float(value), 2), 0., date))
+        self.transactions.append(self.transaction('BUY', ast, round(float(shares), 5), round(float(value), 2), 0., date, self.id))
         old_cost_basis = self.cost_bases[ast] * self.holdings[ast]
         self.holdings[ast] += float(shares)
         self.cost_bases[ast] = (old_cost_basis + value) / self.holdings[ast]
         self.cash -= float(value)
+        self.id += 1
 
     def sell(self, asset: Asset, *, shares: float | None = None, value: float | None = None, 
             date: DateLike | None = None, currency: str | None = None) -> None:
@@ -210,13 +213,14 @@ class Portfolio:
             value = shares * price
 
         profit = (value - (self.cost_bases[ast] * shares))
-        self.transactions.append(self.transaction('SELL', ast, round(float(shares), 5), round(float(value), 2), float(profit), date))
+        self.transactions.append(self.transaction('SELL', ast, round(float(shares), 5), round(float(value), 2), float(profit), date, self.id))
 
         self.holdings[ast] -= float(shares)
         self.cash += float(value)
         if self.holdings[ast] < 1e-8:
             del self.holdings[ast]
             del self.assets[idx]
+        self.id += 1
 
     def pie_chart(self, data: dict, title: str):
         fig = go.Figure()
@@ -548,16 +552,17 @@ class Portfolio:
 
         running_deposit = pd.Series(running_deposit)
         cash = pd.Series(cash)
+        running_deposit.index = pd.to_datetime(running_deposit.index)
+        cash.index = pd.to_datetime(cash.index)
 
         # Convert to DataFrame and forward fill
         holdings_df = pd.DataFrame.from_dict(holdings_changes, orient='index').fillna(0)
         holdings_df.index = pd.to_datetime(holdings_df.index)
+        earliest_date = min(cash.index[0], running_deposit.index[0], holdings_df.index[0])
         holdings_df = holdings_df.reindex(
-            pd.date_range(start=holdings_df.index[0].date(), end=pd.Timestamp.today(), freq=('D' if has_crypto else 'B'))
+            pd.date_range(start=earliest_date.date(), end=pd.Timestamp.today(), freq=('D' if has_crypto else 'B'))
         ).ffill()
 
-        running_deposit.index = pd.to_datetime(running_deposit.index)
-        cash.index = pd.to_datetime(cash.index)
         running_deposit = running_deposit.reindex(holdings_df.index).fillna(0).cumsum()
         cash = cash.reindex(holdings_df.index).fillna(0).cumsum()
 
@@ -1059,6 +1064,7 @@ class Portfolio:
             'cash': self.cash,
             'r': self.r,
             'currency': self.currency,
+            'id': self.id,
         }
 
         with pg.connect(**DB_CONFIG) as conn:
@@ -1074,11 +1080,11 @@ class Portfolio:
                     ticker = t.asset if type(t.asset) == str else t.asset.ticker
                     cur.execute("""
                         INSERT INTO portfolio_transactions 
-                        (name, type, asset, shares, value, profit, date)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (name, type, asset, value, date) 
+                        (name, type, asset, shares, value, profit, date, id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (name, id) 
                         DO NOTHING
-                    """, (name, t.type, ticker, t.shares, t.value, t.profit, t.date))
+                    """, (name, t.type, ticker, t.shares, t.value, t.profit, t.date, t.id))
 
     @classmethod
     def load(cls, name):
@@ -1100,6 +1106,7 @@ class Portfolio:
 
         # update state
         port.cash = state['cash']
+        port.id = state['id']
 
         port.assets = [Asset(ast) for ast in state['assets']]
         for ast in port.assets:
@@ -1130,7 +1137,7 @@ class Portfolio:
                 ast = historical_assets[idx]
             else:
                 ast = 'Cash'
-            t = cls.transaction(t[1], ast, t[3], t[4], t[5], t[6])
+            t = cls.transaction(t[1], ast, t[3], t[4], t[5], t[6], t[7])
             t_list.append(t)
 
         port.transactions = t_list

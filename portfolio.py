@@ -20,7 +20,7 @@ DateLike = str | datetime.datetime | datetime.date | pd.Timestamp
 
 class Portfolio:
 
-    transaction = namedtuple('transaction', ['type', 'asset', 'shares', 'value', 'date'])
+    transaction = namedtuple('transaction', ['type', 'asset', 'shares', 'value', 'profit', 'date'])
 
     def __init__(self, assets: dict | None = None, currency: str | None = None, r: float = 0.02):
         self.holdings = defaultdict(float)
@@ -41,6 +41,9 @@ class Portfolio:
             else:
                 self.currency = currency
 
+            if self.currency != 'USD':
+                self._convert_ast(self.market)
+
             for ast in self.assets:
                 if ast.currency != self.currency:
                     self._convert_ast(ast)
@@ -54,6 +57,9 @@ class Portfolio:
 
                 self.cost_bases[ast] = avg_price
                 self.cash = assets.get('Cash', 0)
+
+        self.market = Asset('SPY')
+        self._convert_ast(self.market)
 
     def _convert_price(self, price: float, currency: str, date: DateLike | None = None) -> float:
         date = self._parse_date(date)[:10]
@@ -130,7 +136,7 @@ class Portfolio:
         if currency != self.currency:
             value = self._convert_price(value, currency, date)
 
-        self.transactions.append(self.transaction('DEPOSIT', 'Cash', 0.0, float(value), date))
+        self.transactions.append(self.transaction('DEPOSIT', 'Cash', 0.0, float(value), 0., date))
         self.cash += value
 
     def buy(self, asset: Asset, *, shares: float | None = None, value: float | None = None, 
@@ -169,7 +175,7 @@ class Portfolio:
         if self.cash - value < 0:
             raise ValueError('Not enough money')
 
-        self.transactions.append(self.transaction('BUY', ast, float(shares), float(value), date))
+        self.transactions.append(self.transaction('BUY', ast, float(shares), float(value), 0., date))
         old_cost_basis = self.cost_bases[ast] * self.holdings[ast]
         self.holdings[ast] += float(shares)
         self.cost_bases[ast] = (old_cost_basis + value) / self.holdings[ast]
@@ -201,7 +207,8 @@ class Portfolio:
             price = self._get_price(ast, date)
             value = shares * price
 
-        self.transactions.append(self.transaction('SELL', ast, float(shares), float(value), date))
+        profit = (value - (self.cost_bases[ast] * shares))
+        self.transactions.append(self.transaction('SELL', ast, float(shares), float(value), float(profit), date))
 
         self.holdings[ast] -= float(shares)
         self.cash += float(value)
@@ -394,11 +401,107 @@ class Portfolio:
 
     @property
     def stats(self):
-        pass
+        """Calculate and return comprehensive portfolio statistics."""
+
+        # Returns & Performance Metrics
+        performance_metrics = {
+            'current_value': self.get_value(),
+            'total_return': self.total_returns,
+            'trading_return': self.trading_returns,
+            'annualized_return': self.annualized_returns,
+            'daily_returns': {
+                'mean': float(self.returns.mean()),
+                'median': float(self.returns.median()),
+                'std': float(self.returns.std()),
+                'skewness': float(stats.skew(self.returns.dropna())),
+                'kurtosis': float(stats.kurtosis(self.returns.dropna())),
+            },
+            'best_day': float(self.returns.max()),
+            'worst_day': float(self.returns.min()),
+            'positive_days': float((self.returns > 0).sum() / len(self.returns)),
+        }
+
+        # Risk Metrics
+        risk_metrics = {
+            'volatility': self.volatility,
+            'sharpe_ratio': self.sharpe_ratio,
+            'sortino_ratio': self.sortino_ratio,
+            'beta': self.beta,
+            'value_at_risk': self.VaR(),
+            'tracking_error': self.tracking_error,
+            'information_ratio': self.information_ratio,
+            'treynor_ratio': self.treynor_ratio,
+        }
+
+        # Drawdown Metrics
+        drawdown_metrics = {
+            'max_drawdown': self.max_drawdown,
+            'average_drawdown': self.average_drawdown,
+            'drawdown_ratio': self.drawdown_ratio,
+            'calmar_ratio': self.calmar_ratio,
+            'longest_drawdown': self.longest_drawdown_duration,
+            'time_to_recovery': self.time_to_recovery(),
+            'avg_drawdown_duration': self.average_drawdown_duration(),
+        }
+
+        # Position & Exposure Metrics
+        position_metrics = {
+            'total_value': self.get_value(),
+            'cash': self.cash,
+            'cash_weight': self.cash / self.get_value(),
+            'number_of_positions': len(self.holdings),
+            'largest_position': max(self.weights.values()) if self.weights else 0,
+            'smallest_position': min(self.weights.values()) if self.weights else 0,
+            'concentration': sum(w*w for w in self.weights.values()),  # Herfindahl-Hirschman Index
+        }
+
+        # Trading Activity Metrics
+        activity_metrics = {
+            'realized_pnl': self.realized_pnl,
+            'unrealized_pnl': self.unrealized_pnl,
+            'total_pnl': self.trading_pnl(),
+            'investment_pnl': self.investment_pnl(),
+            'net_deposits': self.net_deposits,
+            'number_of_trades': len([t for t in self.transactions if t.type in ['BUY', 'SELL']]),
+            'win_rate': self.win_rate,
+        }
+
+        return {
+            'performance': performance_metrics,
+            'risk': risk_metrics,
+            'drawdown': drawdown_metrics,
+            'position': position_metrics,
+            'activity': activity_metrics,
+        }
+    
+    @property
+    def information_ratio(self):
+        market = self.market.daily['rets'].reindex(self.returns.index)
+        active_returns = self.returns - market
+        return float(np.mean(active_returns) / self.tracking_error) if self.tracking_error != 0 else 0
+
+    @property
+    def treynor_ratio(self):
+        daily_rf = self.r / self.ann_factor
+        excess_returns = self.returns - daily_rf
+        mean_excess_returns = excess_returns.mean() * self.ann_factor
+        return float(mean_excess_returns / self.beta) if self.beta != 0 else 0
+
+    @property
+    def tracking_error(self):
+        market = self.market.daily['rets'].reindex(self.returns.index)
+        return round(float(np.std(self.returns - market)), 3)
+
+    @property
+    def win_rate(self):
+        sells = [t for t in self.transactions if t.type == 'SELL']
+        if not sells:
+            return 0
+        return len([t for t in sells if t.profit > 0]) / len(sells)
 
     @property
     def total_returns(self) -> float:
-        return np.exp(self.log_returns.sum())
+        return float(np.exp(self.log_returns.sum()))
 
     @property
     def trading_returns(self) -> float:
@@ -471,7 +574,7 @@ class Portfolio:
     def returns(self):
         deps, cash, values = self._returns_helper()
         rets = (values + cash / deps)
-        return rets.pct_change()
+        return rets.pct_change().dropna()
 
     @property
     def log_returns(self):
@@ -481,13 +584,7 @@ class Portfolio:
     @property
     def realized_pnl(self) -> float:
         """Profit from sold shares: (sale proceeds) - (cost basis of sold shares)."""
-        realized = 0.0
-        for t in self.transactions:
-            if t.type == 'SELL':
-                # Find total cost basis of the sold shares
-                cost_basis = t.shares * self.cost_bases[t.asset]
-                realized += (t.value - cost_basis)
-        return realized
+        return sum(t.profit for t in self.transactions if t.type == 'SELL')
 
     @property
     def unrealized_pnl(self) -> float:
@@ -548,12 +645,12 @@ class Portfolio:
             return 0
 
         daily_vol = self.returns.std()
-        return daily_vol * np.sqrt(self.ann_factor)
+        return float(daily_vol * np.sqrt(self.ann_factor))
 
     @property
     def annualized_returns(self):
 
-        return (1 + self.returns.mean()) ** self.ann_factor - 1
+        return float((1 + self.returns.mean()) ** self.ann_factor - 1)
 
     @property
     def downside_deviation(self):
@@ -579,12 +676,7 @@ class Portfolio:
 
         # Annualize mean excess returns
         mean_excess_returns = excess_returns.mean() * ann_factor
-        print(f"Mean excess returns (pre-ann): {excess_returns.mean()}")
-        print(f"Downside deviation: {downside_deviation}")
-        print(f"Annual factor: {ann_factor}")
-        print(f"Final annualized excess return: {mean_excess_returns}")
-
-        return mean_excess_returns / (downside_deviation * np.sqrt(ann_factor))
+        return float(mean_excess_returns / (downside_deviation * np.sqrt(ann_factor)))
 
     @property
     def weights(self):
@@ -612,12 +704,11 @@ class Portfolio:
         if vol == 0:
             return 0
 
-        return mean_excess_returns / vol
+        return float(mean_excess_returns / vol)
 
     @property
     def beta(self):
-        market = Asset('SPY')
-        self._convert_ast(market)
+        market = self.market
         df = pd.DataFrame(index=pd.date_range(start='2020-01-01', end=pd.Timestamp.today()))
         has_crypto = False
         df['market'] = market.daily['log_rets']
@@ -944,7 +1035,7 @@ class Portfolio:
             'max_drawdown': self.max_drawdown,
             'average_drawdown': self.average_drawdown,
             'drawdown_ratio': self.drawdown_ratio,
-            'longest_drawdown_duration': self.longest_drawdown_duration,
+            'longest_drawdown': self.longest_drawdown_duration,
             'time_to_recovery': self.time_to_recovery(),
             'average_drawdown_duration': self.average_drawdown_duration(),
             'calmar_ratio': self.calmar_ratio

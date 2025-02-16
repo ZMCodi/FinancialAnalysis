@@ -470,30 +470,25 @@ class Portfolio:
 
         return {asset: float(self._get_price(asset, date) * shares)
                 for asset, shares in self.holdings.items()}
+    
+    @property
+    def ann_factor(self):
+        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')
+        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'Cryptocurrency')
+        return (stock_weight * 252) + (crypto_weight * 365)
 
     @property
     def volatility(self):
         if not self.weights:
             return 0
 
-        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')
-        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'Cryptocurrency')
-
-        # Weight the annualization factor
-        ann_factor = (stock_weight * 252) + (crypto_weight * 365)
-
         daily_vol = self.returns.std()
-        return daily_vol * np.sqrt(ann_factor)
+        return daily_vol * np.sqrt(self.ann_factor)
 
     @property
     def annualized_returns(self):
-        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')
-        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'Cryptocurrency')
 
-        # Weight the annualization factor
-        ann_factor = (stock_weight * 252) + (crypto_weight * 365)
-
-        return (1 + self.returns.mean()) ** ann_factor - 1
+        return (1 + self.returns.mean()) ** self.ann_factor - 1
 
     @property
     def downside_deviation(self):
@@ -509,10 +504,7 @@ class Portfolio:
         if downside_deviation == 0:
             return 0
 
-        # Calculate weighted annualization factor
-        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')
-        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'Cryptocurrency')
-        ann_factor = (stock_weight * 252) + (crypto_weight * 365)
+        ann_factor = self.ann_factor
 
         # Convert annual risk-free rate to daily using weighted factor
         daily_rf = self.r / ann_factor
@@ -522,8 +514,12 @@ class Portfolio:
 
         # Annualize mean excess returns
         mean_excess_returns = excess_returns.mean() * ann_factor
+        print(f"Mean excess returns (pre-ann): {excess_returns.mean()}")
+        print(f"Downside deviation: {downside_deviation}")
+        print(f"Annual factor: {ann_factor}")
+        print(f"Final annualized excess return: {mean_excess_returns}")
 
-        return mean_excess_returns / downside_deviation
+        return mean_excess_returns / (downside_deviation * np.sqrt(ann_factor))
 
     @property
     def weights(self):
@@ -536,10 +532,7 @@ class Portfolio:
         if not self.weights:
             return 0
 
-        # Calculate weighted annualization factor
-        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')
-        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'Cryptocurrency')
-        ann_factor = (stock_weight * 252) + (crypto_weight * 365)
+        ann_factor = self.ann_factor
 
         # Convert annual risk-free rate to daily using weighted factor
         daily_rf = self.r / ann_factor
@@ -630,13 +623,7 @@ class Portfolio:
             weights.append(port_weights[ast])
         weights = np.array(weights)
 
-        stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')
-        crypto_weight = sum(v for k, v in self.weights.items() if k.asset_type == 'Cryptocurrency')
-
-        # Weight the annualization factor
-        ann_factor = (stock_weight * 252) + (crypto_weight * 365)
-
-        cov = df.cov() * ann_factor
+        cov = df.cov() * self.ann_factor
         port_vol = np.sqrt(weights.T @ cov @ weights)
         marginal_risk = (cov @ weights) / port_vol
         component_risk = marginal_risk * weights
@@ -862,11 +849,11 @@ class Portfolio:
             })
 
         return pd.DataFrame(recovery_periods)
-    
+
     @property
     def calmar_ratio(self):
         return float(self.annualized_returns / np.abs(self.max_drawdown))
-    
+
     @property
     def drawdown_metrics(self):
         fig = go.Figure()

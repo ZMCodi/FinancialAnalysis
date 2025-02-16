@@ -104,6 +104,8 @@ class Portfolio:
             df['log_rets'] = np.log(df['adj_close'] / df['adj_close'].shift(1))
             df['rets'] = df['adj_close'].pct_change(fill_method=None)
 
+        asset.currency = self.currency
+
     def _parse_date(self, date: DateLike | None = None) -> str:
         if date is None:
             date = datetime.date.today()
@@ -567,6 +569,7 @@ class Portfolio:
 
         portfolio_values = holdings_df.mul(prices).sum(axis=1)
 
+        # return prices, holdings_df
         return running_deposit, cash, portfolio_values
 
     @property
@@ -1095,15 +1098,6 @@ class Portfolio:
 
         port = cls(currency=state['currency'], r=state['r'])
 
-        # update transactions
-        t_list = []
-        for t in transactions:
-            ast = t[2] if t[2] == 'Cash' else Asset(t[2])
-            t = cls.transaction(t[1], ast, t[3], t[4], t[5], t[6])
-            t_list.append(t)
-
-        port.transactions = t_list
-
         # update state
         port.cash = state['cash']
 
@@ -1125,6 +1119,21 @@ class Portfolio:
                 if ast.currency != port.currency:
                     port._convert_ast(ast)
                 port.cost_bases[ast] = state['cost_bases'][ticker]
+
+        # update transactions
+        historical_assets = [ast for ast in port.cost_bases.keys()]
+        t_list = []
+        for t in transactions:
+            if t[2] != 'Cash':
+                ast = Asset(t[2])
+                idx = historical_assets.index(ast)
+                ast = historical_assets[idx]
+            else:
+                ast = 'Cash'
+            t = cls.transaction(t[1], ast, t[3], t[4], t[5], t[6])
+            t_list.append(t)
+
+        port.transactions = t_list
 
         return port
 

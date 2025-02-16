@@ -319,13 +319,46 @@ class Portfolio:
                 xaxis_title='Returns',
                 yaxis_title='Count'
             )
-        
+
         fig.show()
 
         return fig
 
-    def rebalance(self):
-        pass
+    def rebalance(self, target_weights: dict, inplace: bool = False):
+        for ast in target_weights:
+            if ast not in self.assets:
+                raise ValueError(f'Asset {ast} not in portfolio')
+
+        if not inplace:
+            new_port = Portfolio({ast: {'shares': self.holdings[ast], 'avg_price': self.cost_bases[ast]} for ast in self.assets})
+            new_port.cash = self.cash
+        else:
+            new_port = self
+
+        total_weight = sum(target_weights.values())
+        if total_weight <= 0:
+            raise ValueError('Total weight must be positive')
+        target_weights = {ast: w / total_weight for ast, w in target_weights.items()}
+
+        values = self.holdings_value()
+        total_value = sum(values.values())
+        curr_weight = self.weights
+        weight_diff = {ast: target_weights.get(ast, 0) - curr_weight[ast] for ast in self.assets}
+        sorted_assets = sorted(self.assets, key=lambda x: weight_diff[x])
+
+        for ast in sorted_assets:
+            if ast not in target_weights:
+                new_port.sell(ast, shares=new_port.holdings[ast], currency=self.currency)
+            else:
+                t_value = target_weights[ast] * total_value
+                if t_value < values[ast]:
+                    new_port.sell(ast, value=values[ast] - t_value, currency=self.currency)
+                elif t_value > values[ast]:
+                    new_port.buy(ast, value=t_value - values[ast], currency=self.currency)
+            print(new_port.cash)
+
+        if not inplace:
+            return new_port.transactions
 
     @property
     def stats(self):
@@ -470,7 +503,7 @@ class Portfolio:
 
         return {asset: float(self._get_price(asset, date) * shares)
                 for asset, shares in self.holdings.items()}
-    
+
     @property
     def ann_factor(self):
         stock_weight = sum(v for k, v in self.weights.items() if k.asset_type != 'Cryptocurrency')

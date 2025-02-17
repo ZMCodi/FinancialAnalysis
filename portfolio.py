@@ -30,6 +30,7 @@ class Portfolio:
         self.transactions = []
         self.assets = []
         self.forex_cache = {}
+        self.asset_mapping = {}
         self.r = r
         self.cash = 0.0
         self.id = 0
@@ -57,7 +58,7 @@ class Portfolio:
                     avg_price = assets[ast]['avg_price']
 
                 self.cost_bases[ast] = avg_price
-                self.cash = assets.get('Cash', 0)
+            self.cash = assets.get('Cash', 0)
 
         self.market = Asset('SPY')
         self._convert_ast(self.market)
@@ -381,7 +382,7 @@ class Portfolio:
             elif t.type == 'SELL':
                 self.sell(t.asset, shares=t.shares, value=t.value, date=t.date, currency=self.currency)
 
-    def from_vanguard(self, filename: str):
+    def from_212(self, filename: str):
         port_df = pd.read_csv(filename)
         port_df = port_df[['Action', 'Time', 'Ticker', 'No. of shares', 'Currency (Price / share)', 'Total']]
         port_df.rename(columns={'Action': 'action', 'Time': 'time', 'Ticker': 'ticker', 'No. of shares': 'shares', 'Currency (Price / share)': 'currency', 'Total': 'value'}, inplace=True)
@@ -1128,15 +1129,10 @@ class Portfolio:
                 port.cost_bases[ast] = state['cost_bases'][ticker]
 
         # update transactions
-        historical_assets = [ast for ast in port.cost_bases.keys()]
+        asset_mapping = {ast.ticker: ast for ast in port.cost_bases.keys()}
         t_list = []
         for t in transactions:
-            if t[2] != 'Cash':
-                ast = Asset(t[2])
-                idx = historical_assets.index(ast)
-                ast = historical_assets[idx]
-            else:
-                ast = 'Cash'
+            ast = asset_mapping.get(t[2], 'Cash')
             t = cls.transaction(t[1], ast, t[3], t[4], t[5], t[6], t[7])
             t_list.append(t)
 
@@ -1147,3 +1143,7 @@ class Portfolio:
     @classmethod
     def report(cls, name):
         pass
+
+# TODO:
+# make loading from db faster
+# make unique id for portfolio

@@ -403,30 +403,88 @@ class Portfolio:
                 self.sell(t.asset, shares=t.shares, value=t.value, date=t.date, currency=self.currency)
 
     def from_212(self, filename: str):
-        port_df = pd.read_csv(filename)
-        port_df = port_df[['Action', 'Time', 'Ticker', 'No. of shares', 'Currency (Price / share)', 'Total']]
-        port_df.rename(columns={'Action': 'action', 'Time': 'time', 'Ticker': 'ticker', 'No. of shares': 'shares', 'Currency (Price / share)': 'currency', 'Total': 'value'}, inplace=True)
-        port_df['time'] = port_df['time'].apply(lambda x: x[:10])
-        port_df['time'] = pd.to_datetime(port_df['time'])
-        port_df.loc[port_df['currency'] == 'GBX', 'currency'] = 'GBP'
+        df = pd.read_csv(filename)
+        df = df[['Action', 'Time', 'Ticker', 'No. of shares', 'Currency (Price / share)', 'Total']]
+        df.rename(columns={'Action': 'action', 'Time': 'time', 'Ticker': 'ticker', 'No. of shares': 'shares', 'Currency (Price / share)': 'currency', 'Total': 'value'}, inplace=True)
+        df['time'] = df['time'].apply(lambda x: x[:10])
+        df['time'] = pd.to_datetime(df['time'])
+        df.loc[df['currency'] == 'GBX', 'currency'] = 'GBP'
         def clean_action(x):
             if x == 'Deposit':
                 return x.lower()
             else:
                 return x[7:]
-        port_df['action'] = port_df['action'].apply(lambda x: clean_action(x))
-        port_df['time'] = port_df['time'].dt.date
-        port_df.loc[port_df['currency'] == 'GBP', 'ticker'] += '.L'
-        tickers = list(port_df['ticker'].dropna().unique())
+        df['action'] = df['action'].apply(lambda x: clean_action(x))
+        df['time'] = df['time'].dt.date
+        df.loc[df['currency'] == 'GBP', 'ticker'] += '.L'
+        tickers = list(df['ticker'].dropna().unique())
         asset_mapping = {ticker: Asset(ticker) for ticker in tickers}
 
-        for _, row in port_df.iterrows():
+        for _, row in df.iterrows():
             if row['action'] == 'buy':
                 self.buy(asset_mapping[row['ticker']], shares=row['shares'], value=row['value'], date=row['time'], currency=self.currency)
             elif row['action'] == 'sell':
                 self.sell(asset_mapping[row['ticker']], shares=row['shares'], value=row['value'], date=row['time'], currency=self.currency)
             elif row['action'] == 'deposit':
                 self.deposit(row['value'], currency=self.currency, date=row['time'])
+
+    def from_vanguard(self, filename: str):
+        df = pd.read_excel(filename, sheet_name=1)
+
+        # Get cash transactions
+        eoft = df[df['ISA'] == 'Balance'].index[0]
+        soft = df[df['ISA'] == 'Cash Transactions'].index[0]
+        cash = df.iloc[soft+2:eoft+1]
+        cash = cash.dropna(axis=1, how='all')
+        cash.columns = cash.iloc[0]
+        cash = cash[1:-1]
+        cash = cash[['Date', 'Details', 'Amount']]
+        cash = cash[cash['Details'].str.contains('Deposit|Withdrawal', na=False)]
+        def clean_details(x):
+            if 'Deposit' in x:
+                return 'Deposit'
+            else:
+                return 'Withdrawal'
+        cash['Action'] = cash['Details'].apply(lambda x: clean_details(x))
+        cash = cash.drop(columns=['Details'])
+        cash['Date'] = cash['Date'].astype(str).str.slice(0, 10)
+        cash = cash.rename(columns={'Amount': 'Cost'})
+
+        # Get asset transactions
+        sost = df[df['ISA'] == 'Investment Transactions'].index[0]
+        inv = df.iloc[sost+2:]
+        inv.columns = inv.iloc[0]
+        inv = inv[1:-1]
+        inv = inv[['Date', 'InvestmentName', 'Quantity', 'Cost']]
+        def set_action(x):
+            if x < 0:
+                return 'Sell'
+            else:
+                return 'Buy'
+        inv['Action'] = inv['Quantity'].apply(lambda x: set_action(x))
+        inv['Date'] = inv['Date'].astype(str).str.slice(0, 10)
+
+        ticker_map = {
+            'LifeStrategy 100% Equity Fund - Accumulation': '0P0000TKZO.L',
+        }
+        inv['InvestmentName'] = inv['InvestmentName'].str.strip()
+        inv['Ticker'] = inv['InvestmentName'].map(ticker_map)
+        inv = inv.drop(columns=['InvestmentName'])
+
+        # Combine and sort
+        df = pd.concat([cash, inv]).sort_values('Date')
+        tickers = list(df['Ticker'].dropna().unique())
+        asset_mapping = {ticker: Asset(ticker) for ticker in tickers}
+
+        for _, row in df.iterrows():
+            if row['Action'] == 'Deposit':
+                self.deposit(row['Cost'], currency=self.currency, date=row['Date'])
+            elif row['Action'] == 'Withdrawal':
+                self.withdraw(-row['Cost'], currency=self.currency, date=row['Date'])
+            elif row['Action'] == 'Buy':
+                self.buy(asset_mapping[row['Ticker']], shares=row['Quantity'], value=row['Cost'], date=row['Date'], currency=self.currency)
+            elif row['Action'] == 'Sell':
+                self.sell(asset_mapping[row['Ticker']], shares=-row['Quantity'], value=-row['Cost'], date=row['Date'], currency=self.currency)
 
     @property
     def stats(self):
@@ -600,7 +658,6 @@ class Portfolio:
 
         portfolio_values = holdings_df.mul(prices).sum(axis=1)
 
-        # return prices, holdings_df
         return running_deposit, cash, portfolio_values
 
     @property
@@ -1173,6 +1230,4 @@ class Portfolio:
 
 # TODO:
 # make unique id for portfolio
-# read from vanguard pdf
 # add vanguard lifestrategy mappings
-# make new table for index funds and handle insertion logic

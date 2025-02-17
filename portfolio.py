@@ -144,6 +144,19 @@ class Portfolio:
         self.cash += float(value)
         self.id += 1
 
+    def withdraw(self, value: float, currency: str | None = None, date: DateLike | None = None):
+        date = self._parse_date(date)
+
+        if currency != self.currency:
+            value = self._convert_price(value, currency, date)
+
+        if self.cash - value < 0:
+            raise ValueError('Not enough money')
+
+        self.transactions.append(self.transaction('WITHDRAW', 'Cash', 0.0, float(value), 0., date, self.id))
+        self.cash -= float(value)
+        self.id += 1
+
     def buy(self, asset: Asset, *, shares: float | None = None, value: float | None = None, 
             date: DateLike | None = None, currency: str | None = None) -> None:
 
@@ -378,6 +391,8 @@ class Portfolio:
         for t in transactions:
             if t.type == 'DEPOSIT':
                 self.deposit(t.value, currency=self.currency, date=t.date)
+            elif t.type == 'WITHDRAW':
+                self.withdraw(t.value, currency=self.currency, date=t.date)
             elif t.type == 'BUY':
                 self.buy(t.asset, shares=t.shares, value=t.value, date=t.date, currency=self.currency)
             elif t.type == 'SELL':
@@ -552,6 +567,9 @@ class Portfolio:
             elif t.type == 'DEPOSIT':
                 running_deposit[t.date] += t.value
                 cash[t.date] += t.value
+            elif t.type == 'WITHDRAW':
+                running_deposit[t.date] -= t.value
+                cash[t.date] -= t.value
             holdings_changes[t.date[:10]] = dict(current_holdings)
 
         running_deposit = pd.Series(running_deposit)
@@ -613,7 +631,7 @@ class Portfolio:
 
     @property
     def net_deposits(self):
-        return sum(t.value for t in self.transactions if t.type == 'DEPOSIT')
+        return sum(t.value for t in self.transactions if t.type == 'DEPOSIT') - sum(t.value for t in self.transactions if t.type == 'WITHDRAW')
 
     def investment_pnl(self, date: DateLike | None = None) -> float:
         """Total portfolio PnL at date"""
@@ -1152,6 +1170,5 @@ class Portfolio:
 # TODO:
 # make unique id for portfolio
 # read from vanguard pdf
-# add withdraw method
 # add vanguard lifestrategy mappings
 # make new table for index funds and handle insertion logic

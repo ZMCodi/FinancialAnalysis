@@ -214,7 +214,7 @@ class Portfolio:
             value = shares * price
 
         profit = (value - (self.cost_bases[ast] * shares))
-        self.transactions.append(self.transaction('SELL', ast, round(float(shares), 5), round(float(value), 2), float(profit), date, self.id))
+        self.transactions.append(self.transaction('SELL', ast, round(float(shares), 5), round(float(value), 2), round(float(profit), 2), date, self.id))
 
         self.holdings[ast] -= float(shares)
         self.cash += float(value)
@@ -386,7 +386,7 @@ class Portfolio:
         port_df = pd.read_csv(filename)
         port_df = port_df[['Action', 'Time', 'Ticker', 'No. of shares', 'Currency (Price / share)', 'Total']]
         port_df.rename(columns={'Action': 'action', 'Time': 'time', 'Ticker': 'ticker', 'No. of shares': 'shares', 'Currency (Price / share)': 'currency', 'Total': 'value'}, inplace=True)
-        port_df['time'] = port_df['time'].apply(lambda x: x[:19])
+        port_df['time'] = port_df['time'].apply(lambda x: x[:10])
         port_df['time'] = pd.to_datetime(port_df['time'])
         port_df.loc[port_df['currency'] == 'GBX', 'currency'] = 'GBP'
         def clean_action(x):
@@ -397,12 +397,14 @@ class Portfolio:
         port_df['action'] = port_df['action'].apply(lambda x: clean_action(x))
         port_df['time'] = port_df['time'].dt.date
         port_df.loc[port_df['currency'] == 'GBP', 'ticker'] += '.L'
+        tickers = list(port_df['ticker'].dropna().unique())
+        asset_mapping = {ticker: Asset(ticker) for ticker in tickers}
 
         for _, row in port_df.iterrows():
             if row['action'] == 'buy':
-                self.buy(Asset(row['ticker']), shares=row['shares'], value=row['value'], date=row['time'], currency=self.currency)
+                self.buy(asset_mapping[row['ticker']], shares=row['shares'], value=row['value'], date=row['time'], currency=self.currency)
             elif row['action'] == 'sell':
-                self.sell(Asset(row['ticker']), shares=row['shares'], value=row['value'], date=row['time'], currency=self.currency)
+                self.sell(asset_mapping[row['ticker']], shares=row['shares'], value=row['value'], date=row['time'], currency=self.currency)
             elif row['action'] == 'deposit':
                 self.deposit(row['value'], currency=self.currency, date=row['time'])
 

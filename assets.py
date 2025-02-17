@@ -69,6 +69,7 @@ class Asset():
         # query db and check if ticker exists
         with pg.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
+
                 cur.execute("SELECT date, open, high, low, close, adj_close, volume FROM daily WHERE ticker = %s", (self.ticker,))
                 # if not, add new ticker and requery
                 if cur.rowcount == 0:
@@ -76,6 +77,10 @@ class Asset():
                     cur.execute("SELECT date, open, high, low, close, adj_close, volume FROM daily WHERE ticker = %s", (self.ticker,))
 
                 data = cur.fetchall()
+
+                # get metadata like asset type and currency
+                cur.execute("SELECT asset_type, currency, sector FROM tickers WHERE ticker = %s", (self.ticker,))
+                self.asset_type, self.currency, self.sector = cur.fetchone()
 
                 # reindex data and calculate returns and log returns
                 self.daily = pd.DataFrame(data, columns=['date', 'open', 'high', 'low', 'close', 'adj_close', 'volume']).set_index('date')
@@ -85,6 +90,10 @@ class Asset():
                 self.daily['log_rets'] = np.log(self.daily['adj_close'] / self.daily['adj_close'].shift(1))
                 self.daily['rets'] = self.daily['adj_close'].pct_change()
 
+                if self.asset_type == 'Mutual Fund':
+                    self.five_minute = self.daily
+                    return
+
                 # same for five minute data
                 cur.execute("SELECT date, open, high, low, close, adj_close, volume FROM five_minute WHERE ticker = %s", (self.ticker,))
                 self.five_minute = pd.DataFrame(cur.fetchall(), columns=['date', 'open', 'high', 'low', 'close', 'adj_close', 'volume']).set_index('date')
@@ -93,10 +102,6 @@ class Asset():
                 self.five_minute = self.five_minute.sort_index()
                 self.five_minute['log_rets'] = np.log(self.five_minute['adj_close'] / self.five_minute['adj_close'].shift(1))
                 self.five_minute['rets'] = self.five_minute['adj_close'].pct_change()
-
-                # get metadata like asset type and currency
-                cur.execute("SELECT asset_type, currency, sector FROM tickers WHERE ticker = %s", (self.ticker,))
-                self.asset_type, self.currency, self.sector = cur.fetchone()
 
     def __insert_new_ticker(self) -> None:
         """Downloads and inserts new ticker to database
@@ -122,7 +127,9 @@ class Asset():
         currency = ticker.info['currency'].upper()
         start_date = pd.to_datetime('today').date()
         asset_type = ticker.info['quoteType']
-        if asset_type != 'ETF':
+        if asset_type == 'MUTUALFUND':
+            asset_type = 'Mutual Fund'
+        elif asset_type != 'ETF':
             asset_type = asset_type.capitalize()
 
         # map exchanges according to pandas market calendar
@@ -152,27 +159,28 @@ class Asset():
         print(f'Inserting to DB {ticker=}, {comp_name=}, {exchange=}, {currency=}, {asset_type=}, {market_cap=}, {sector=}')
 
         # Get daily data from 2020, clean and transform
-        daily_data = yf.download(self.ticker, start='2020-01-01')
+        daily_data = yf.download(self.ticker, start='2020-01-01', auto_adjust=False)
         daily_data = daily_data.droplevel(1, axis=1)
         daily_data['ticker'] = self.ticker
         clean_daily = self.__clean_data(daily_data)
         clean_daily = clean_daily.rename(columns={'Date': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
         # adj_close column might not be available, especially for crypto
-        if 'Adj Close' not in clean_daily.columns:
+        if 'Adj Close' not in clean_daily.columns or asset_type == 'Mutual Fund':
             clean_daily['adj_close'] = clean_daily['close']
         else:
             clean_daily = clean_daily.rename(columns={'Adj Close': 'adj_close'})
 
         # Get 5min data
-        five_min_data = yf.download(self.ticker, interval='5m')
-        five_min_data = five_min_data.droplevel(1, axis=1)
-        five_min_data['ticker'] = self.ticker
-        clean_five_min = self.__clean_data(five_min_data)
-        clean_five_min = clean_five_min.rename(columns={'Datetime': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
-        if 'Adj Close' not in clean_five_min.columns:
-            clean_five_min['adj_close'] = clean_five_min['close']
-        else:
-            clean_five_min = clean_five_min.rename(columns={'Adj Close': 'adj_close'})
+        if asset_type != 'Mutual Fund':
+            five_min_data = yf.download(self.ticker, interval='5m', auto_adjust=False)
+            five_min_data = five_min_data.droplevel(1, axis=1)
+            five_min_data['ticker'] = self.ticker
+            clean_five_min = self.__clean_data(five_min_data)
+            clean_five_min = clean_five_min.rename(columns={'Datetime': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
+            if 'Adj Close' not in clean_five_min.columns:
+                clean_five_min['adj_close'] = clean_five_min['close']
+            else:
+                clean_five_min = clean_five_min.rename(columns={'Adj Close': 'adj_close'})
 
         # Insert to database
         with pg.connect(**DB_CONFIG) as conn:
@@ -210,20 +218,21 @@ class Asset():
                 rows_inserted = 0
 
                 # insert 5min data
-                for _, row in clean_five_min.iterrows():
-                    cur.execute("INSERT INTO five_minute (ticker, date, open, high, low, close, adj_close, volume) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", (row['ticker'], row['date'], row['open'], row['high'], row['low'], row['close'], row['adj_close'], row['volume']))
-                    batch_count += 1
-                    rows_inserted += 1
+                if asset_type != 'Mutual Fund':
+                    for _, row in clean_five_min.iterrows():
+                        cur.execute("INSERT INTO five_minute (ticker, date, open, high, low, close, adj_close, volume) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", (row['ticker'], row['date'], row['open'], row['high'], row['low'], row['close'], row['adj_close'], row['volume']))
+                        batch_count += 1
+                        rows_inserted += 1
 
-                    if batch_count >= BATCH_SIZE:
+                        if batch_count >= BATCH_SIZE:
+                            conn.commit()
+                            batch_count = 0
+
+                    if batch_count > 0:
                         conn.commit()
                         batch_count = 0
 
-                if batch_count > 0:
-                    conn.commit()
-                    batch_count = 0
-
-                print(f'five_min_{rows_inserted=}')
+                    print(f'five_min_{rows_inserted=}')
 
 
     def __clean_data(self, df: DataFrame) -> DataFrame:

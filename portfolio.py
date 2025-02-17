@@ -139,9 +139,10 @@ class Portfolio:
 
         if currency != self.currency:
             value = self._convert_price(value, currency, date)
+        value = round(float(value), 2)
 
-        self.transactions.append(self.transaction('DEPOSIT', 'Cash', 0.0, float(value), 0., date, self.id))
-        self.cash += float(value)
+        self.transactions.append(self.transaction('DEPOSIT', 'Cash', 0.0, value, 0., date, self.id))
+        self.cash += value
         self.id += 1
 
     def withdraw(self, value: float, currency: str | None = None, date: DateLike | None = None):
@@ -149,12 +150,13 @@ class Portfolio:
 
         if currency != self.currency:
             value = self._convert_price(value, currency, date)
+        value = round(float(value), 2)
 
         if self.cash - value < 0:
             raise ValueError('Not enough money')
 
-        self.transactions.append(self.transaction('WITHDRAW', 'Cash', 0.0, float(value), 0., date, self.id))
-        self.cash -= float(value)
+        self.transactions.append(self.transaction('WITHDRAW', 'Cash', 0.0, value, 0., date, self.id))
+        self.cash -= value
         self.id += 1
 
     def buy(self, asset: Asset, *, shares: float | None = None, value: float | None = None, 
@@ -189,16 +191,17 @@ class Portfolio:
             # get value from shares * price at date
             price = self._get_price(ast, date)
             value = shares * price
+        value = round(float(value), 2)
 
         # update portfolio values
-        if self.cash - value < 0:
+        if self.cash - value < -0.01:
             raise ValueError('Not enough money')
 
-        self.transactions.append(self.transaction('BUY', ast, round(float(shares), 5), round(float(value), 2), 0., date, self.id))
+        self.transactions.append(self.transaction('BUY', ast, round(float(shares), 5), value, 0., date, self.id))
         old_cost_basis = self.cost_bases[ast] * self.holdings[ast]
         self.holdings[ast] += float(shares)
         self.cost_bases[ast] = (old_cost_basis + value) / self.holdings[ast]
-        self.cash -= float(value)
+        self.cash -= value
         self.id += 1
 
     def sell(self, asset: Asset, *, shares: float | None = None, value: float | None = None, 
@@ -227,11 +230,12 @@ class Portfolio:
             price = self._get_price(ast, date)
             value = shares * price
 
+        value = round(float(value), 2)
         profit = (value - (self.cost_bases[ast] * shares))
-        self.transactions.append(self.transaction('SELL', ast, round(float(shares), 5), round(float(value), 2), round(float(profit), 2), date, self.id))
+        self.transactions.append(self.transaction('SELL', ast, round(float(shares), 5), value, round(float(profit), 2), date, self.id))
 
         self.holdings[ast] -= float(shares)
-        self.cash += float(value)
+        self.cash += value
         if self.holdings[ast] < 1e-8:
             del self.holdings[ast]
             del self.assets[idx]

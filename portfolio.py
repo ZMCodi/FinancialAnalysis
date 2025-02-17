@@ -47,6 +47,7 @@ class Portfolio:
                 self._convert_ast(self.market)
 
             for ast in self.assets:
+                del ast.five_minute
                 if ast.currency != self.currency:
                     self._convert_ast(ast)
 
@@ -100,11 +101,10 @@ class Portfolio:
 
         forex = self.forex_cache[key]
 
-        for df in [asset.daily, asset.five_minute]:
-            frx = forex.reindex_like(df, method='ffill')[['close']]
-            df[['open', 'high', 'low', 'close', 'adj_close']] = df[['open', 'high', 'low', 'close', 'adj_close']].mul(frx['close'], axis=0)
-            df['log_rets'] = np.log(df['adj_close'] / df['adj_close'].shift(1))
-            df['rets'] = df['adj_close'].pct_change(fill_method=None)
+        frx = forex.reindex_like(asset.daily, method='ffill')[['close']]
+        asset.daily[['open', 'high', 'low', 'close', 'adj_close']] = asset.daily[['open', 'high', 'low', 'close', 'adj_close']].mul(frx['close'], axis=0)
+        asset.daily['log_rets'] = np.log(asset.daily['adj_close'] / asset.daily['adj_close'].shift(1))
+        asset.daily['rets'] = asset.daily['adj_close'].pct_change(fill_method=None)
 
         asset.currency = self.currency
 
@@ -154,6 +154,7 @@ class Portfolio:
 
         if asset not in self.assets:
             ast = Asset(asset.ticker)  # create copy
+            del ast.five_minute
             if ast.currency != self.currency:
                 self._convert_ast(ast)
             self.assets.append(ast)
@@ -1112,7 +1113,9 @@ class Portfolio:
         port.id = state['id']
 
         port.assets = [Asset(ast) for ast in state['assets']]
+
         for ast in port.assets:
+            del ast.five_minute
             if ast.currency != port.currency:
                 port._convert_ast(ast)
 
@@ -1147,5 +1150,8 @@ class Portfolio:
         pass
 
 # TODO:
-# make loading from db faster
 # make unique id for portfolio
+# read from vanguard pdf
+# add withdraw method
+# add vanguard lifestrategy mappings
+# make new table for index funds and handle insertion logic

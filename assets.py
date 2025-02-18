@@ -13,13 +13,7 @@ import pandas as pd
 from pandas.core.frame import DataFrame
 import numpy as np
 import psycopg as pg
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
-import seaborn as sns
-import plotly.express as px
 from datetime import datetime, date
-import kaleido
-import mplfinance as mpf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy import stats
@@ -409,12 +403,13 @@ class Asset():
             data = data.resample(resample).last()
 
         data = data.dropna()
+        format = '%Y-%m-%d' if timeframe == '1d' else '%Y-%m-%d<br>%H:%M:%S'
 
         fig = go.Figure()
         # Add price trace
         fig.add_trace(
             go.Scatter(
-                x=data.index,
+                x=data.index.strftime(format),
                 y=data,
                 name=f'{self.ticker} Price',
                 connectgaps=True
@@ -431,7 +426,12 @@ class Asset():
         fig.update_layout(
             title=f'{self.ticker} Price History',
             xaxis_title='Date',
-            yaxis_title=f'Price ({self.currency})'
+            yaxis_title=f'Price ({self.currency})',
+            xaxis=dict(
+                type='category',
+                categoryorder='category ascending',
+                nticks=5
+            )
         )
 
         fig.show()
@@ -476,9 +476,11 @@ class Asset():
         else:
             fig = go.Figure()
 
+        format = '%Y-%m-%d' if timeframe == '1d' else '%Y-%m-%d<br>%H:%M:%S'
+
         # Create candlestick trace
         candlestick = go.Candlestick(
-            x=data.index,
+            x=data.index.strftime(format),
             open=data['open'],
             high=data['high'],
             low=data['low'],
@@ -491,7 +493,7 @@ class Asset():
             for open, close in zip(data['open'], data['close'])]
 
             volume_bars = go.Bar(
-                x=data.index,
+                x=data.index.strftime(format),
                 y=data['volume'],
                 name='Volume',
                 marker=dict(
@@ -515,12 +517,21 @@ class Asset():
             'height': 800 if volume else 600
         }
 
+        layout_updates['xaxis1'] = dict(
+            type='category',
+            categoryorder='category ascending',
+            nticks=5
+        )
+
         if volume:
             layout_updates[f'xaxis2_rangeslider_visible'] = False
+            layout_updates['xaxis2'] = layout_updates['xaxis1']
 
         layout_updates['title'] = title
 
         layout_updates['yaxis_title'] = f'Price ({self.currency})'
+
+        
 
         fig.update_layout(**layout_updates)
 
@@ -570,11 +581,12 @@ class Asset():
             param = f'{window=}'
 
         fig = go.Figure()
+        format = '%Y-%m-%d' if timeframe == '1d' else '%Y-%m-%d<br>%H:%M:%S'
 
         # Add main price line
         fig.add_trace(
             go.Scatter(
-                x=data.index,
+                x=data.index.strftime(format),
                 y=data['close_mean'],
                 line=dict(
                     color='#2962FF',
@@ -588,7 +600,7 @@ class Asset():
         if bollinger_bands:
             # Add lower band
             fig.add_trace(go.Scatter(
-                x=data.index,
+                x=data.index.strftime(format),
                 y=data['bol_low'],
                 name='Lower Band',
                 line=dict(color='#FF4081', width=1, dash='dash'),
@@ -599,7 +611,7 @@ class Asset():
 
             # Add upper band with fill
             fig.add_trace(go.Scatter(
-                x=data.index,
+                x=data.index.strftime(format),
                 y=data['bol_up'],
                 name='Upper Band',
                 line=dict(color='#FF4081', width=1, dash='dash'),
@@ -624,6 +636,9 @@ class Asset():
                 gridwidth=1,
                 gridcolor='rgba(128,128,128,0.2)',
                 title=None,
+                type='category',
+                categoryorder='category ascending',
+                nticks=5
             ),
             yaxis=dict(
                 showgrid=True,

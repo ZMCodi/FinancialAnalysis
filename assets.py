@@ -124,7 +124,11 @@ class Asset():
         # transform metadata for insertion to database
         comp_name = ticker.info['shortName'].replace("'", "''")
         exchange = ticker.info['exchange']
-        currency = ticker.info['currency'].upper()
+        currency = ticker.info['currency']
+        in_pence = False
+        if currency == 'GBp':
+            currency = 'GBP'
+            in_pence = True
         start_date = pd.to_datetime('today').date()
         asset_type = ticker.info['quoteType']
         if asset_type == 'MUTUALFUND':
@@ -170,6 +174,9 @@ class Asset():
         else:
             clean_daily = clean_daily.rename(columns={'Adj Close': 'adj_close'})
 
+        if in_pence:
+            clean_daily[['open', 'high', 'low', 'close', 'adj_close']] /= 100
+
         # Get 5min data
         if asset_type != 'Mutual Fund':
             five_min_data = yf.download(self.ticker, interval='5m', auto_adjust=False)
@@ -181,6 +188,11 @@ class Asset():
                 clean_five_min['adj_close'] = clean_five_min['close']
             else:
                 clean_five_min = clean_five_min.rename(columns={'Adj Close': 'adj_close'})
+
+            if in_pence:
+                clean_five_min[['open', 'high', 'low', 'close', 'adj_close']] /= 100
+
+
 
         # Insert to database
         with pg.connect(**DB_CONFIG) as conn:

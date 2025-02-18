@@ -262,8 +262,7 @@ class Strategy(ABC):
 
     def backtest(self, plot: bool = True, timeframe: str = '1d', 
                 start_date: Optional[DateLike] = None, end_date: Optional[DateLike] = None, 
-                show_signal: bool = True, fig: Optional[go.Figure] = None, 
-                subplot_idx: Optional[tuple[int, int]] = None) -> pd.Series:
+                show_signal: bool = True) -> pd.Series:
         """Backtest the strategy and optionally plot results.
 
         Performs backtesting by applying the strategy's signals to historical data
@@ -276,8 +275,6 @@ class Strategy(ABC):
             start_date (DateLike, optional): Start date for backtest. Defaults to None.
             end_date (DateLike, optional): End date for backtest. Defaults to None.
             show_signal (bool, optional): Whether to plot signals. Defaults to True.
-            fig (go.Figure, optional): Existing figure to add plots to. Defaults to None.
-            subplot_idx (tuple[int, int], optional): Subplot position (row, col). Defaults to None.
 
         Returns:
             pd.Series: Series with two values:
@@ -293,9 +290,11 @@ class Strategy(ABC):
         if end_date is not None:
             df = df[df.index <= end_date]
 
+        format = '%Y-%m-%d' if timeframe == '1d' else '%Y-%m-%d<br>%H:%M:%S'
+
         if plot:
             trace1 = go.Scatter(
-                x=df.index,
+                x=df.index.strftime(format),
                 y=np.exp(df['returns'].cumsum()),
                 line=dict(
                     color='#2962FF',
@@ -307,7 +306,7 @@ class Strategy(ABC):
             )
 
             trace2 = go.Scatter(
-                x=df.index,
+                x=df.index.strftime(format),
                 y=np.exp(df['strategy'].cumsum()),
                 line=dict(
                     color='red',
@@ -320,51 +319,39 @@ class Strategy(ABC):
 
             if show_signal:
                 trace3 = go.Scatter(
-                    x=df.index,
+                    x=df.index.strftime(format),
                     y=df['signal'],
                     line=dict(color='green', width=0.8, dash='solid'),
                     name='Buy/Sell signal',
                     yaxis='y2'
                 )
 
-            # Add traces based on whether it's a subplot or not
-            standalone = False
-            if fig is None:
-                standalone = True
-                fig = go.Figure()
 
-            fig.add_trace(trace1,
-                        row=subplot_idx[0] if subplot_idx else None,
-                        col=subplot_idx[1] if subplot_idx else None)
+            fig = go.Figure()
 
-            fig.add_trace(trace2, 
-                        row=subplot_idx[0] if subplot_idx else None,
-                        col=subplot_idx[1] if subplot_idx else None)
+            fig.add_trace(trace1)
+            fig.add_trace(trace2)
 
             if show_signal:
-                if standalone:
-                    fig.add_trace(trace3)
-                else:
-                    fig.add_trace(trace3,
-                                row=subplot_idx[0] if subplot_idx else None,
-                                col=subplot_idx[1] if subplot_idx else None,
-                                secondary_y=True)
+                fig.add_trace(trace3)
 
             # Update layout with secondary y-axis
             layout = {}
 
-            if standalone:
-                layout['title'] = dict(
-                        text=f'{self.asset.ticker} {name} Backtest {self.params}',
-                        x=0.5,
-                        y=0.95
-                    )
+            layout['title'] = dict(
+                    text=f'{self.asset.ticker} {name} Backtest {self.params}',
+                    x=0.5,
+                    y=0.95
+                )
 
             layout['xaxis'] = dict(
                     showgrid=True,
                     gridwidth=1,
                     gridcolor='rgba(128,128,128,0.2)',
                     title=None,
+                    type='category',
+                    categoryorder='category ascending',
+                    nticks=5
                 )
 
             layout['yaxis'] = dict(
@@ -399,19 +386,7 @@ class Strategy(ABC):
                                 plot_bgcolor='rgba(240,240,240,0.95)',
                                 hovermode='x unified')
 
-            if standalone:
-                fig.show()
-            else:
-                fig.update_yaxes(
-                    title_text=f'Returns',
-                    row=subplot_idx[0] if subplot_idx else None, 
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-                fig.update_xaxes(
-                    title_text=f'{self.asset.ticker} {name} Backtest {self.params}', 
-                    row=subplot_idx[0] if subplot_idx else None, 
-                    col=subplot_idx[1] if subplot_idx else None
-                )
+            fig.show()
 
         return np.exp(df[['returns', 'strategy']].sum())
     
@@ -692,10 +667,11 @@ class MA_Crossover(Strategy):
 
         short_param = f'{self.ptype}={self.short}'
         long_param = f'{self.ptype}={self.long}'
+        format = '%Y-%m-%d' if timeframe == '1d' else '%Y-%m-%d<br>%H:%M:%S'
 
         # Add short MA line
         short_MA = go.Scatter(
-            x=short_data.index,
+            x=short_data.index.strftime(format),
             y=short_data,
             line=dict(
                 color='#2962FF',
@@ -708,7 +684,7 @@ class MA_Crossover(Strategy):
 
         # Add long MA line
         long_MA = go.Scatter(
-            x=long_data.index,
+            x=long_data.index.strftime(format),
             y=long_data,
             line=dict(
                 color='red',
@@ -721,7 +697,7 @@ class MA_Crossover(Strategy):
 
         if show_signal:
             signal = go.Scatter(
-                x=signal.index,
+                x=signal.index.strftime(format),
                 y=signal,
                 line=dict(color='green', width=0.8, dash='solid'),
                 name='Buy/Sell signal',
@@ -752,6 +728,9 @@ class MA_Crossover(Strategy):
                 gridwidth=1,
                 gridcolor='rgba(128,128,128,0.2)',
                 title=None,
+                type='category',
+                categoryorder='category ascending',
+                nticks=5
             )
 
         layout['yaxis'] = dict(
@@ -1134,6 +1113,7 @@ class RSI(Strategy):
             df = df[df.index <= end_date]
 
         df.dropna(inplace=True)
+        format = '%Y-%m-%d' if timeframe == '1d' else '%Y-%m-%d<br>%H:%M:%S'
 
         fig = make_subplots(rows=2, cols=1, 
                         shared_xaxes=True, 
@@ -1144,7 +1124,7 @@ class RSI(Strategy):
 
         if candlestick:
             price = go.Candlestick(
-                        x=df.index,
+                        x=df.index.strftime(format),
                         open=df['open'],
                         high=df['high'],
                         low=df['low'],
@@ -1153,7 +1133,7 @@ class RSI(Strategy):
             )
         else:
             price = go.Scatter(
-                        x=df.index,
+                        x=df.index.strftime(format),
                         y=df['adj_close'],
                         line=dict(
                             color='#2962FF',
@@ -1164,7 +1144,7 @@ class RSI(Strategy):
             )
 
         RSI = go.Scatter(
-                x=df.index,
+                x=df.index.strftime(format),
                 y=df['rsi'],
                 line=dict(color='blue', width=1.5),
                 name='RSI'
@@ -1172,7 +1152,7 @@ class RSI(Strategy):
 
         if show_signal:
             signal = go.Scatter(
-                        x=df.index,
+                        x=df.index.strftime(format),
                         y=df['signal'],
                         line=dict(color='green', width=0.8, dash='solid'),
                         name='Buy/Sell signal',
@@ -1201,7 +1181,16 @@ class RSI(Strategy):
                 gridwidth=1,
                 gridcolor='rgba(128,128,128,0.2)',
                 title=None,
+                type='category',
+                categoryorder='category ascending',
+                nticks=5
             )
+
+        layout['xaxis2'] = dict(
+            type='category',
+            categoryorder='category ascending',
+            nticks=5
+        )
 
         layout['yaxis'] = dict(
                 showgrid=True,
@@ -1581,6 +1570,7 @@ class MACD(Strategy):
             df = df[df.index <= end_date]
 
         df.dropna(inplace=True)
+        format = '%Y-%m-%d' if timeframe == '1d' else '%Y-%m-%d<br>%H:%M:%S'
 
         fig = make_subplots(rows=2, cols=1, 
                         shared_xaxes=True, 
@@ -1591,7 +1581,7 @@ class MACD(Strategy):
 
         if candlestick:
             price = go.Candlestick(
-                        x=df.index,
+                        x=df.index.strftime(format),
                         open=df['open'],
                         high=df['high'],
                         low=df['low'],
@@ -1600,7 +1590,7 @@ class MACD(Strategy):
             )
         else:
             price = go.Scatter(
-                        x=df.index,
+                        x=df.index.strftime(format),
                         y=df['adj_close'],
                         line=dict(
                             color='#2962FF',
@@ -1611,21 +1601,21 @@ class MACD(Strategy):
             )
 
         MACD = go.Scatter(
-                x=df.index,
+                x=df.index.strftime(format),
                 y=df['macd'],
                 line=dict(color='red', width=1.5),
                 name='MACD'
         )
 
         signal_line = go.Scatter(
-                x=df.index,
+                x=df.index.strftime(format),
                 y=df['signal_line'],
                 line=dict(color='blue', width=1.5),
                 name='Signal Line'
         )
 
         macd_hist = go.Bar(
-                x=df.index,
+                x=df.index.strftime(format),
                 y=df['macd_hist'],
                 marker_color='black',
                 name='MACD Histogram'
@@ -1633,7 +1623,7 @@ class MACD(Strategy):
 
         if show_signal:
             signal = go.Scatter(
-                        x=df.index,
+                        x=df.index.strftime(format),
                         y=df['signal'],
                         line=dict(color='green', width=0.8, dash='solid'),
                         name='Buy/Sell signal',
@@ -1664,7 +1654,16 @@ class MACD(Strategy):
                 gridwidth=1,
                 gridcolor='rgba(128,128,128,0.2)',
                 title=None,
+                type='category',
+                categoryorder='category ascending',
+                nticks=5
             )
+
+        layout['xaxis2'] = dict(
+            type='category',
+            categoryorder='category ascending',
+            nticks=5
+        )
 
         layout['yaxis'] = dict(
                 showgrid=True,
@@ -2008,6 +2007,7 @@ class BB(Strategy):
             df = df[df.index <= end_date]
 
         df.dropna(inplace=True)
+        format = '%Y-%m-%d' if timeframe == '1d' else '%Y-%m-%d<br>%H:%M:%S'
 
         fig = go.Figure()
 
@@ -2015,7 +2015,7 @@ class BB(Strategy):
 
         if candlestick:
             price = go.Candlestick(
-                        x=df.index,
+                        x=df.index.strftime(format),
                         open=df['open'],
                         high=df['high'],
                         low=df['low'],
@@ -2024,7 +2024,7 @@ class BB(Strategy):
             )
 
             sma = go.Scatter(
-                        x=df.index,
+                        x=df.index.strftime(format),
                         y=df['sma'],
                         line=dict(
                             color='#2962FF',
@@ -2037,7 +2037,7 @@ class BB(Strategy):
             traces.extend([price, sma])
         else:
             price = go.Scatter(
-                        x=df.index,
+                        x=df.index.strftime(format),
                         y=df['adj_close'],
                         line=dict(
                             color='#2962FF',
@@ -2050,7 +2050,7 @@ class BB(Strategy):
             traces.append(price)
 
         bol_down = go.Scatter(
-            x=df.index,
+            x=df.index.strftime(format),
             y=df['bol_down'],
             line=dict(color='#FF4081', width=1, dash='dash'),
             showlegend=False,
@@ -2058,7 +2058,7 @@ class BB(Strategy):
         )
 
         bol_up = go.Scatter(
-            x=df.index,
+            x=df.index.strftime(format),
             y=df['bol_up'],
             fill='tonexty',
             line=dict(color='#FF4081', width=1, dash='dash'),
@@ -2071,7 +2071,7 @@ class BB(Strategy):
 
         if show_signal:
             signal = go.Scatter(
-                        x=df.index,
+                        x=df.index.strftime(format),
                         y=df['signal'],
                         line=dict(color='green', width=0.8, dash='solid'),
                         name='Buy/Sell signal',
@@ -2095,6 +2095,9 @@ class BB(Strategy):
                 gridwidth=1,
                 gridcolor='rgba(128,128,128,0.2)',
                 title=None,
+                type='category',
+                categoryorder='category ascending',
+                nticks=5
             )
 
         layout['yaxis'] = dict(
@@ -2366,12 +2369,13 @@ class CombinedStrategy(Strategy):
             df = df[df.index <= end_date]
 
         df.dropna(inplace=True)
+        format = '%Y-%m-%d' if timeframe == '1d' else '%Y-%m-%d<br>%H:%M:%S'
 
         fig = go.Figure()
 
         if candlestick:
             price = go.Candlestick(
-                        x=df.index,
+                        x=df.index.strftime(format),
                         open=df['open'],
                         high=df['high'],
                         low=df['low'],
@@ -2380,7 +2384,7 @@ class CombinedStrategy(Strategy):
             )
         else:
             price = go.Scatter(
-                        x=df.index,
+                        x=df.index.strftime(format),
                         y=df['adj_close'],
                         line=dict(
                             color='#2962FF',
@@ -2391,7 +2395,7 @@ class CombinedStrategy(Strategy):
             )
 
         signal = go.Scatter(
-                    x=df.index,
+                    x=df.index.strftime(format),
                     y=df['signal'],
                     line=dict(color='green', width=0.8, dash='solid'),
                     name='Buy/Sell signal',
@@ -2413,6 +2417,9 @@ class CombinedStrategy(Strategy):
                 gridwidth=1,
                 gridcolor='rgba(128,128,128,0.2)',
                 title=None,
+                type='category',
+                categoryorder='category ascending',
+                nticks=5
             )
 
         layout['yaxis'] = dict(

@@ -380,8 +380,7 @@ class Asset():
 
     def plot_price_history(self, *, timeframe: str = '1d', start_date: Optional[DateLike] = None,
                         end_date: Optional[DateLike] = None, resample: Optional[str] = None, 
-                        interactive: bool = True, line: Optional[int | float] = None, filename: Optional[str] = None, 
-                        fig: Optional[go.Figure | Figure] = None, subplot_idx: Optional[int | tuple[int, int]] = None) -> go.Figure | Figure:
+                        line: Optional[int | float] = None) -> go.Figure:
         """Plots the price history of the underlying asset.
 
         Args:
@@ -391,19 +390,10 @@ class Asset():
             end_date (DateLike, optional): End date for plotting range. Defaults to None.
             resample (str, optional): Resampling frequency in pandas format (e.g., 'B' for business day).
                 Used primarily with 5-min data to remove flat regions during market close. Defaults to None.
-            interactive (bool, optional): Whether to create an interactive Plotly graph (True) 
-                or static Matplotlib graph (False). Defaults to True.
             line (float | int, optional): Y-value for horizontal threshold line. Defaults to None.
-            filename (str, optional): Path to save the figure. Defaults to None.
-            fig (plotly.graph_objects.Figure | matplotlib.figure.Figure, optional): Existing figure to plot on.
-                Used for overlaying plots or creating subplots. Defaults to None.
-            subplot_idx (int | tuple[int, int], optional): Subplot position specifier.
-                For Matplotlib: integer index.
-                For Plotly: (row, col) tuple. Defaults to None.
 
         Returns:
-            (plotly.graph_objects.Figure | matplotlib.figure.Figure): Price history of underlying asset.
-                Returns Plotly figure if interactive=True, Matplotlib figure otherwise.
+            (plotly.graph_objects.Figure): Price history of underlying asset.
         """
 
         # choose data based on specified timeframe
@@ -420,123 +410,37 @@ class Asset():
 
         data = data.dropna()
 
-        # static plot
-        if not interactive:
-            # Set the style and figure size
-            plt.style.use('seaborn-v0_8')
+        fig = go.Figure()
+        # Add price trace
+        fig.add_trace(
+            go.Scatter(
+                x=data.index,
+                y=data,
+                name=f'{self.ticker} Price',
+                connectgaps=True
+            )
+        )
 
-            # create figure if not passed or get axes from figure
-            standalone = True
-            if fig is None:
-                fig, ax = plt.subplots(figsize=(12, 6))
-            else:
-                ax = fig.axes[subplot_idx] if subplot_idx is not None else fig.gca()
-                standalone = False
-
-            # Create the plot with customizations
-            sns.lineplot(data=data.to_frame(), x=data.index, y=data, ax=ax,
-                        color='#1f77b4',
-                        linewidth=2)
-
-            # Customize the title and labels
-            ax.set_title(f'{self.ticker} Price History', 
-                        fontsize=16, 
-                        pad=20,
-                        fontweight='bold')
-            ax.set_xlabel('Year', fontsize=12)
-            ax.set_ylabel(f'Price ({self.currency})', fontsize=12)
-
-            ax.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.7)
-
-            def format_prices(x, p):
-                if x >= 1e3:
-                    return f'{x/1e3:.1f}K'
-                else:
-                    return f'{x:.1f}'
-
-            ax.yaxis.set_major_formatter(plt.FuncFormatter(format_prices))
-
-            # Customize the spines
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-
-            ax.tick_params(labelsize=10)
-            plt.xticks(rotation=0)
-
-            ax.set_facecolor('#f8f9fa')
-            fig.patch.set_facecolor('white')
-
-            # add line at specified height
-            if line is not None:
-                ax.axhline(line, color='r', linestyle='--')
-
-            if filename is not None:
-                fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
-
-            if standalone:
-                plt.show()
-
-        # interactive plot
-        else:
-
-            # keeps track of whether plot is a subplot or standalone
-            standalone = False
-            if fig is None:
-                fig = go.Figure()
-                standalone = True
-
-            # Add price trace
-            fig.add_trace(
-                go.Scatter(
-                    x=data.index,
-                    y=data,
-                    name=f'{self.ticker} Price',
-                    connectgaps=True
-                ),
-                row=subplot_idx[0] if subplot_idx else None,
-                col=subplot_idx[1] if subplot_idx else None
+        # add line
+        if line is not None:
+            fig.add_hline(y=line,
+                line_dash="dash",
+                line_color="red",
             )
 
-            # add line
-            if line is not None:
-                fig.add_hline(y=line,
-                    line_dash="dash",
-                    line_color="red",
-                )
+        fig.update_layout(
+            title=f'{self.ticker} Price History',
+            xaxis_title='Date',
+            yaxis_title=f'Price ({self.currency})'
+        )
 
-            # Only add title and show plot if standalone
-            if standalone:
-                fig.update_layout(
-                    title=f'{self.ticker} Price History',
-                    xaxis_title='Date',
-                    yaxis_title=f'Price ({self.currency})'
-                )
-
-                fig.show()
-
-            # if subplots, only update the axes
-            else:
-                fig.update_yaxes(
-                    title_text=f'Price ({self.currency})', 
-                    row=subplot_idx[0] if subplot_idx else None,
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-                fig.update_xaxes(
-                    title_text=f'{self.ticker} Price History', 
-                    row=subplot_idx[0] if subplot_idx else None,
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-
-            if filename is not None:
-                fig.write_image(filename)
+        fig.show()
 
         return fig
 
 
     def plot_candlestick(self, *, timeframe: str = '1d', start_date: Optional[DateLike] = None, end_date: Optional[DateLike] = None, 
-                         resample: Optional[str] = None, interactive: bool = True, volume: bool = True,
-                         filename: Optional[str] = None, fig: Optional[go.Figure | Figure] = None, 
-                         candle_idx: Optional[int | tuple[int, int]] = None, vol_idx: Optional[int | tuple[int, int]] = None) -> go.Figure | Figure:
+                         resample: Optional[str] = None, volume: bool = True) -> go.Figure:
         """Plots the candlestick chart of the underlying asset.
 
         Args:
@@ -545,22 +449,10 @@ class Asset():
             start_date (DateLike, optional): Start date for plotting range. Defaults to None.
             end_date (DateLike, optional): End date for plotting range. Defaults to None.
             resample (str, optional): Resampling frequency in pandas format (e.g., 'B' for business day).
-            interactive (bool, optional): Whether to create an interactive Plotly graph (True) 
-                or static Matplotlib graph (False). Defaults to True.
             volume (bool): Whether to plot volume bars or not. Defaults to True
-            filename (str, optional): Path to save the figure. Defaults to None.
-            fig (plotly.graph_objects.Figure | matplotlib.figure.Figure, optional): Existing figure to plot on.
-                Used for overlaying plots or creating subplots. Defaults to None.
-            candle_idx (int | tuple[int, int], optional): Candlestick subplot position specifier.
-                For Matplotlib: integer index.
-                For Plotly: (row, col) tuple. Defaults to None.
-            vol_idx (int | tuple[int, int], optional): Volume bars subplot position specifier.
-                For Matplotlib: integer index.
-                For Plotly: (row, col) tuple. Defaults to None.
 
         Returns:
-            (plotly.graph_objects.Figure | matplotlib.figure.Figure): Candlestick chart of underlying asset.
-                Returns Plotly figure if interactive=True, Matplotlib figure otherwise.
+            (plotly.graph_objects.Figure): Candlestick chart of underlying asset.
         """
 
         if resample is not None:
@@ -573,257 +465,72 @@ class Asset():
         if start_date is not None:
             data = data[data.index >= start_date]
 
-        # default time window for static plot to ensure plot is readable
-        else:
-            if not interactive:
-                if timeframe == '1d':
-                    days_back = 365
-                else:
-                    if self.asset_type == 'Cryptocurrency':
-                        days_back = 1
-                    else:
-                        days_back = 3
-                data = data[data.index >= data.index[-1] - pd.Timedelta(days=days_back)]
-
         data = data.dropna()
 
-        # static plot
-        if not interactive:
-
-            plt.style.use('seaborn-v0_8')
-
-            # create figure and axes or use existing if passed
-            if fig is None:
-                standalone = True
-                if volume:
-                    fig, (ax1, ax2) = plt.subplots(2, figsize=(12, 8), height_ratios=(3, 1))
-                else:
-                    fig, ax1 = plt.subplots(figsize=(12, 6))
-            else:
-                standalone = False
-                if volume:
-                    ax1 = fig.axes[candle_idx] if candle_idx is not None else fig.gca()
-                    ax2 = fig.axes[vol_idx] if vol_idx is not None else fig.axes[candle_idx + 1]
-                else:
-                    ax1 = fig.axes[candle_idx] if candle_idx is not None else fig.gca()
-
-            fig.patch.set_facecolor('white')
-            ax1.set_facecolor('white')
-
-            # define colors and styles
-            mc = mpf.make_marketcolors(up='#26A69A',
-                                    down='#EF5350', 
-                                    edge='inherit',
-                                    volume='inherit')
-
-            s = mpf.make_mpf_style(marketcolors=mc,
-                                gridstyle=':',
-                                gridcolor='#E0E0E0',
-                                y_on_right=False)
-
-            # create candlestick plot
-            mpf.plot(data,
-                    type='candle',
-                    style=s,
-                    ax=ax1,
-                    datetime_format='%Y-%m-%d')
-
-            ax1.grid(True, linestyle=':', color='#E0E0E0', alpha=0.6)
-
-            # Add title
-            ax1.set_title(f"{self.ticker} Candlestick Chart{' with Volume Bars' if volume else ''}", 
-                        pad=20, 
-                        fontsize=14, 
-                        fontweight='bold',
-                        fontfamily='sans-serif')
-
-            # Refine x-axis formatting
-            n_labels = 6 if standalone else 3
-            step = len(data) // n_labels
-
-            # Clean up candlestick axis
-            ax1.spines['top'].set_visible(False)
-            ax1.spines['right'].set_visible(False)
-            ax1.tick_params(labelsize=10)
-            ax1.set_ylabel(f'Price ({self.currency})', fontsize=10, fontfamily='sans-serif')
-
-            ax1.set_xticks(range(0, len(data), step))
-            ax1.set_xticklabels(data.index[::step].strftime('%Y-%m-%d'), rotation=0)
-
-            def format_prices(x, p):
-                if x >= 1e3:
-                    return f'{x/1e3:.1f}K'
-                else:
-                    return f'{x:.1f}'
-
-            ax1.yaxis.set_major_formatter(plt.FuncFormatter(format_prices))
-
-            # add volume bars
-            if volume:
-                if standalone:
-                    ax1.set_xticklabels([])
-                ax2.set_facecolor('white')
-
-                # format colors according to candlestick
-                colors = ['#26A69A' if close >= open else '#EF5350'
-                        for open, close in zip(data['open'], data['close'])]
-
-                ax2.bar(range(len(data)), 
-                        data['volume'], 
-                        alpha=0.8,
-                        color=colors)
-
-                ax2.grid(True, linestyle=':', color='#E0E0E0', alpha=0.6)
-
-                ax2.set_xticks(range(0, len(data), step))
-                ax2.set_xticklabels(data.index[::step].strftime('%Y-%m-%d'), rotation=0)
-
-                # Clean up volume axis
-                ax2.spines['top'].set_visible(False)
-                ax2.spines['right'].set_visible(False)
-                ax2.tick_params(labelsize=10)
-                ax2.set_ylabel('Volume', fontsize=10, fontfamily='sans-serif')
-
-                # Link the x-axes
-                ax1.set_xlim(ax2.get_xlim())
-
-                def format_volume(x, p):
-                    if x >= 1e9:
-                        return f'{x/1e9:.1f}B'
-                    elif x >= 1e6:
-                        return f'{x/1e6:.1f}M'
-                    else:
-                        return f'{x/1e3:.1f}K'
-
-                ax2.yaxis.set_major_formatter(plt.FuncFormatter(format_volume))
-
-                # Add padding for volume subplot
-                plt.subplots_adjust(bottom=0.15)
-            else:
-                # Format x-axis for single plot
-                n_labels = 6 if standalone else 3
-                step = len(data) // n_labels
-                ax1.set_xticks(range(0, len(data), step))
-                ax1.set_xticklabels(data.index[::step].strftime('%Y-%m-%d'), rotation=0)
-
-            if filename is not None:
-                fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
-
-            if standalone:
-                plt.show()
-
-        # interactive plot
+        # create or use existing figure
+        if volume:
+            fig = make_subplots(rows=2, cols=1, 
+                            shared_xaxes=True, 
+                            vertical_spacing=0.03, 
+                            row_heights=[0.7, 0.3])
         else:
+            fig = go.Figure()
 
-            # create or use existing figure
-            standalone = False
-            if fig is None:
-                standalone = True
-                if volume:
-                    fig = make_subplots(rows=2, cols=1, 
-                                    shared_xaxes=True, 
-                                    vertical_spacing=0.03, 
-                                    row_heights=[0.7, 0.3])
-                else:
-                    fig = go.Figure()
+        # Create candlestick trace
+        candlestick = go.Candlestick(
+            x=data.index,
+            open=data['open'],
+            high=data['high'],
+            low=data['low'],
+            close=data['close'],
+            name='OHLC'
+        )
 
-            if standalone:
-                candlestick_row = 1
-                candlestick_col = 1
-            else:
-                candlestick_row = candle_idx[0] if candle_idx is not None else 1
-                candlestick_col = candle_idx[1] if candle_idx is not None else 1
+        if volume:
+            colors = ['#26A69A' if close >= open else '#EF5350' 
+            for open, close in zip(data['open'], data['close'])]
 
-            # Create candlestick trace
-            candlestick = go.Candlestick(
+            volume_bars = go.Bar(
                 x=data.index,
-                open=data['open'],
-                high=data['high'],
-                low=data['low'],
-                close=data['close'],
-                name='OHLC'
+                y=data['volume'],
+                name='Volume',
+                marker=dict(
+                    color=colors,
+                    line=dict(color=colors)
+                )
             )
 
-            # Add trace with appropriate positioning
-            if not standalone:  # subplot case (with or without volume)
-                fig.add_trace(
-                    candlestick,
-                    row=candlestick_row,
-                    col=candlestick_col
-                )
-            else:  # standalone case
-                fig.add_trace(candlestick)
+            fig.add_trace(candlestick, row=1, col=1)
+            fig.add_trace(volume_bars, row=2, col=1)
+        else:
+            fig.add_trace(candlestick)
 
-            # Add volume only if requested
-            if volume:
-                if vol_idx is not None:
-                    vol_row, vol_col = vol_idx
-                else:
-                    vol_row, vol_col = 2, 1
+        # Update layout
+        title = f'{self.ticker} Candlestick Chart'
+        if volume:
+            title += ' with Volume Bars'
 
-                colors = ['#26A69A' if close >= open else '#EF5350' 
-              for open, close in zip(data['open'], data['close'])]
+        layout_updates = {
+            'xaxis1_rangeslider_visible': False,
+            'height': 800 if volume else 600
+        }
 
-                fig.add_trace(
-                    go.Bar(
-                        x=data.index,
-                        y=data['volume'],
-                        name='Volume',
-                        marker=dict(
-                            color=colors,
-                            line=dict(color=colors)
-                        )
-                    ),
-                    row=vol_row,
-                    col=vol_col
-                )
+        if volume:
+            layout_updates[f'xaxis2_rangeslider_visible'] = False
 
-            # Update layout
-            title = f'{self.ticker} Candlestick Chart'
-            if volume:
-                title += ' with Volume Bars'
+        layout_updates['title'] = title
 
-            layout_updates = {
-                f'xaxis{candlestick_row}_rangeslider_visible': False,
-                'height': 800 if volume else 600
-            }
+        layout_updates['yaxis_title'] = f'Price ({self.currency})'
 
-            if volume:
-                layout_updates[f'xaxis{vol_row}_rangeslider_visible'] = False
+        fig.update_layout(**layout_updates)
 
-            if standalone:
-                layout_updates['title'] = title
-
-            # Update y-axes labels
-            if standalone:  # Single figure
-                layout_updates['yaxis_title'] = f'Price ({self.currency})'
-            else:  # Part of subplots
-                fig.update_yaxes(title_text=f'Price ({self.currency})', row=candlestick_row, col=candlestick_col)
-                fig.update_xaxes(
-                    title_text=f'{self.ticker} Candlestick', row=candlestick_row, col=candlestick_col
-                )
-                if volume:
-                    fig.update_yaxes(title_text="Volume", row=vol_row, col=vol_col)
-                    fig.update_xaxes(
-                        title_text=f'{self.ticker} Volume', row=vol_row, col=vol_col
-                    ) 
-
-            fig.update_layout(**layout_updates)
-
-            # Only show if it's a standalone figure
-            if standalone:
-                fig.show()
-
-            if filename is not None:
-                fig.write_image(filename)
+        fig.show()
 
         return fig
 
     def plot_SMA(self, *, window: int = 20, timeframe: str = '1d', start_date: Optional[DateLike] = None, end_date: Optional[DateLike] = None,
-                 interactive: bool = True, r: float = 0., ewm: bool = False, 
-                 alpha: Optional[float] = None, halflife: Optional[float] = None, bollinger_bands: bool = False, num_std: float = 2.,  
-                 filename: Optional[str] = None, fig: Optional[go.Figure | Figure] = None, 
-                 subplot_idx: Optional[int | tuple[int, int]] = None) -> go.Figure | Figure:
+                 r: float = 0., ewm: bool = False, 
+                 alpha: Optional[float] = None, halflife: Optional[float] = None, bollinger_bands: bool = False, num_std: float = 2.) -> go.Figure:
         """Plots the moving average price of the underlying asset.
 
         Args:
@@ -832,24 +539,15 @@ class Asset():
                 Defaults to '1d'.
             start_date (DateLike, optional): Start date for plotting range. Defaults to None.
             end_date (DateLike, optional): End date for plotting range. Defaults to None.
-            interactive (bool, optional): Whether to create an interactive Plotly graph (True) 
-                or static Matplotlib graph (False). Defaults to True.
             r (float): risk-free rate. Defaults to 0.
             ewm (bool): Whether to use ewm (True) or rolling (False). Defaults to False
             alpha (float, optional): Alpha parameter for ewm. Defaults to None
             halflife (float, optional): Halflife parameter for ewm. Defaults to None
             bollinger_bands (bool): Whether to calculate bollinger bands or not. Defaults to False
             num_std (float): Number of standard deviations for bollinger bands. Defaults to 2.
-            filename (str, optional): Path to save the figure. Defaults to None.
-            fig (plotly.graph_objects.Figure | matplotlib.figure.Figure, optional): Existing figure to plot on.
-                Used for overlaying plots or creating subplots. Defaults to None.
-            subplot_idx (int | tuple[int, int], optional): Subplot position specifier.
-                For Matplotlib: integer index.
-                For Plotly: (row, col) tuple. Defaults to None.
 
         Returns:
-            (plotly.graph_objects.Figure | matplotlib.figure.Figure): Moving average price of underlying asset.
-                Returns Plotly figure if interactive=True, Matplotlib figure otherwise.
+            (plotly.graph_objects.Figure): Moving average price of underlying asset.
         """
         # get MA data
         data = self.rolling_stats(window=window, five_min=True if timeframe != '1d' else False,
@@ -871,166 +569,84 @@ class Asset():
         else:
             param = f'{window=}'
 
-        # static plot
-        if not interactive:
+        fig = go.Figure()
 
-            # create or use existing figure
-            standalone = True
-            if fig is None:
-                fig, ax = plt.subplots(figsize=(12, 6))
-            else:
-                ax = fig.axes[subplot_idx] if subplot_idx is not None else fig.gca()
-                standalone = False
-
-            plt.style.use('seaborn-v0_8')
-
-            # Create the base plot with the main price line
-            sns.lineplot(data=data, x=data.index, y='close_mean', 
-                        color='#2962FF', linewidth=2, label=f'{self.ticker} MA ({param})',
-                        ax=ax)
-
-            if bollinger_bands:
-                # Add the Bollinger Bands
-                sns.lineplot(data=data, x=data.index, y='bol_up', 
-                            color='#FF4081', linestyle='--', linewidth=1, label='Upper Band',
-                            ax=ax)
-                sns.lineplot(data=data, x=data.index, y='bol_low', 
-                            color='#FF4081', linestyle='--', linewidth=1, label='Lower Band',
-                            ax=ax)
-
-                # Fill between the bands
-                ax.fill_between(data.index, data['bol_low'], data['bol_up'], 
-                                alpha=0.1, color='#2962FF')
-
-            # Customize the plot
-            ax.set_title(f'{self.ticker} Moving Average ({param}) {f"with Bollinger Bands ({num_std=})" if bollinger_bands else ""}', pad=20)
-            ax.set_xlabel('Date')
-            ax.set_ylabel(f'Price ({self.currency})')
-
-            def format_prices(x, p):
-                if x >= 1e3:
-                    return f'{x/1e3:.1f}K'
-                else:
-                    return f'{x:.1f}'
-
-            ax.yaxis.set_major_formatter(plt.FuncFormatter(format_prices))
-            ax.legend(loc='upper left', framealpha=0.9)
-            ax.grid(True, alpha=0.2)
-            plt.xticks(rotation=0)
-
-            if filename is not None:
-                fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
-
-            if standalone:
-                plt.show()
-
-        # interactive plot
-        else:
-            # create or use existing figure
-            standalone = False
-            if fig is None:
-                fig = go.Figure()
-                standalone = True
-
-            # Add main price line
-            fig.add_trace(
-                go.Scatter(
-                    x=data.index,
-                    y=data['close_mean'],
-                    line=dict(
-                        color='#2962FF',
-                        width=2,
-                        dash='solid'
-                    ),
-                    name=f'{self.ticker} MA {param}'
+        # Add main price line
+        fig.add_trace(
+            go.Scatter(
+                x=data.index,
+                y=data['close_mean'],
+                line=dict(
+                    color='#2962FF',
+                    width=2,
+                    dash='solid'
                 ),
-                row=subplot_idx[0] if subplot_idx else None,
-                col=subplot_idx[1] if subplot_idx else None
+                name=f'{self.ticker} MA {param}'
+            )
+        )
+
+        if bollinger_bands:
+            # Add lower band
+            fig.add_trace(go.Scatter(
+                x=data.index,
+                y=data['bol_low'],
+                name='Lower Band',
+                line=dict(color='#FF4081', width=1, dash='dash'),
+                mode='lines',
+                showlegend=True
+                )
             )
 
-            if bollinger_bands:
-                # Add lower band
-                fig.add_trace(go.Scatter(
-                    x=data.index,
-                    y=data['bol_low'],
-                    name='Lower Band',
-                    line=dict(color='#FF4081', width=1, dash='dash'),
-                    mode='lines',
-                    showlegend=True
-                    ),
-                    row=subplot_idx[0] if subplot_idx else None,
-                    col=subplot_idx[1] if subplot_idx else None
+            # Add upper band with fill
+            fig.add_trace(go.Scatter(
+                x=data.index,
+                y=data['bol_up'],
+                name='Upper Band',
+                line=dict(color='#FF4081', width=1, dash='dash'),
+                mode='lines',
+                fill='tonexty',
+                fillcolor='rgba(68, 68, 255, 0.1)',
+                showlegend=True
                 )
-
-                # Add upper band with fill
-                fig.add_trace(go.Scatter(
-                    x=data.index,
-                    y=data['bol_up'],
-                    name='Upper Band',
-                    line=dict(color='#FF4081', width=1, dash='dash'),
-                    mode='lines',
-                    fill='tonexty',
-                    fillcolor='rgba(68, 68, 255, 0.1)',
-                    showlegend=True
-                    ),
-                    row=subplot_idx[0] if subplot_idx else None,
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-
-            # update layout
-            fig.update_layout(
-                title=dict(
-                    text=f'{self.ticker} Moving Average ({param}) {f"with Bollinger Bands ({num_std=})" if bollinger_bands else ""}',
-                    x=0.5,  # Center the title
-                    y=0.95
-                ) if standalone else None,
-                paper_bgcolor='white',
-                plot_bgcolor='rgba(240,240,240,0.95)',
-                xaxis=dict(
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='rgba(128,128,128,0.2)',
-                    title=None,
-                ),
-                yaxis=dict(
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='rgba(128,128,128,0.2)',
-                    title=f'Price ({self.currency})',
-                ),
-                legend=dict(
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="left",
-                    x=0.01,
-                    bgcolor='rgba(255,255,255,0.8)'
-                ),
-                hovermode='x unified'
             )
 
-            if not standalone:
-                fig.update_yaxes(
-                    title_text=f'Price ({self.currency})',
-                    row=subplot_idx[0] if subplot_idx else None, 
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-                fig.update_xaxes(
-                    title_text=f'{self.ticker} Moving Average ({param}) {f"with Bollinger Bands ({num_std=})" if bollinger_bands else ""}', 
-                    row=subplot_idx[0] if subplot_idx else None, 
-                    col=subplot_idx[1] if subplot_idx else None
-                )
+        # update layout
+        fig.update_layout(
+            title=dict(
+                text=f'{self.ticker} Moving Average ({param}) {f"with Bollinger Bands ({num_std=})" if bollinger_bands else ""}',
+                x=0.5,  # Center the title
+                y=0.95
+            ),
+            paper_bgcolor='white',
+            plot_bgcolor='rgba(240,240,240,0.95)',
+            xaxis=dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(128,128,128,0.2)',
+                title=None,
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(128,128,128,0.2)',
+                title=f'Price ({self.currency})',
+            ),
+            legend=dict(
+                yanchor="top",
+                y=0.99,
+                xanchor="left",
+                x=0.01,
+                bgcolor='rgba(255,255,255,0.8)'
+            ),
+            hovermode='x unified'
+        )
 
-            if standalone:
-                fig.show()
-
-            if filename is not None:
-                fig.write_image(filename)
+        fig.show()
 
         return fig
 
-    def plot_returns_dist(self, *, log_rets: bool = False, bins: int = 100, interactive: bool = True, 
-                        filename: Optional[str] = None, fig: Optional[go.Figure | Figure] = None, 
-                        subplot_idx: Optional[int | tuple[int, int]] = None, show_stats: bool = True) -> go.Figure | Figure:
+    def plot_returns_dist(self, *, log_rets: bool = False, bins: int = 100,
+                        show_stats: bool = True) -> go.Figure:
         """Plots the returns distribution histogram of the underlying asset.
 
         Args:
@@ -1038,163 +654,76 @@ class Asset():
                 Defaults to False
             interactive (bool, optional): Whether to create an interactive Plotly graph (True) 
                 or static Matplotlib graph (False). Defaults to True.
-            filename (str, optional): Path to save the figure. Defaults to None.
-            fig (plotly.graph_objects.Figure | matplotlib.figure.Figure, optional): Existing figure to plot on.
-                Used for overlaying plots or creating subplots. Defaults to None.
-            subplot_idx (int | tuple[int, int], optional): Subplot position specifier.
-                For Matplotlib: integer index.
-                For Plotly: (row, col) tuple. Defaults to None.
             show_stats (bool): Whether or not to show distribution stats. Defaults to True
 
         Returns:
-            (plotly.graph_objects.Figure | matplotlib.figure.Figure): Returns distribution histogram of underlying asset.
-                Returns Plotly figure if interactive=True, Matplotlib figure otherwise.
+            (plotly.graph_objects.Figure): Returns distribution histogram of underlying asset.
         """
 
         data = self.daily['log_rets'] if log_rets else self.daily['rets']
         data = data.dropna()
 
         # Calculate statistics
-        newline = "\n" if not interactive else "<br>"
         stats_text = (
-            f'Mean: {np.mean(data):.4f}{newline}'
-            f'Std Dev: {np.std(data):.4f}{newline}'
-            f'Skewness: {stats.skew(data):.4f}{newline}'
+            f'Mean: {np.mean(data):.4f}<br>'
+            f'Std Dev: {np.std(data):.4f}<br>'
+            f'Skewness: {stats.skew(data):.4f}<br>'
             f'Kurtosis: {stats.kurtosis(data):.4f}'
         )
 
-        # static plot
-        if not interactive:
+        fig = go.Figure()
 
-            plt.style.use('seaborn-v0_8')
+        bins = np.linspace(data.min(), data.max(), bins + 1)
 
-            # create or use existing figure
-            if fig is None:
-                standalone = True
-                fig, ax = plt.subplots(figsize=(12, 7))
-            else:
-                standalone = False
-                ax = fig.axes[subplot_idx] if subplot_idx is not None else fig.gca()
-
-            # Create histogram
-            sns.histplot(data, 
-                        bins=bins,
-                        color='#2E86C1',
-                        alpha=0.7,
-                        edgecolor='white',
-                        ax=ax)
-
-            # Customize the plot
-            ax.set_title(f'{self.ticker} Returns Distribution', fontsize=14, pad=15, fontweight='bold')
-            ax.set_xlabel('Returns', fontsize=12)
-            ax.set_ylabel('Count', fontsize=12)
-
-            # Remove top and right spines
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-
-            if show_stats:
-                # Add stats box
-                plt.text(0.75, 0.85, stats_text,
-                        transform=ax.transAxes,
-                        bbox=dict(
-                            facecolor='white',
-                            edgecolor='#2E86C1',
-                            alpha=0.9,
-                            boxstyle='round,pad=0.5'
-                        ),
-                        fontsize=10,
-                        verticalalignment='top')
-
-            ax.grid(True, alpha=0.3, linestyle='--')
-            fig.subplots_adjust(hspace=0.4)
-
-            if filename is not None:
-                    fig.savefig(filename, dpi=300, bbox_inches='tight', transparent=(True if filename.endswith('.png') else False))
-
-            if standalone:
-                plt.show()
-
-        # interactive plot
-        else:
-            # create or use existing figure
-            standalone = False
-            if fig is None:
-                fig = go.Figure()
-                standalone = True
-
-            bins = np.linspace(data.min(), data.max(), bins + 1)
-
-            # create histogram
-            fig.add_trace(
-                go.Histogram(
-                    x=data,
-                    xbins=dict(
-                        start=bins[0],
-                        end=bins[-1],
-                        size=(bins[1] - bins[0])  # Forces exact bin width
-                    ),
-                    name=f'{self.ticker} Returns Distribution'
+        # create histogram
+        fig.add_trace(
+            go.Histogram(
+                x=data,
+                xbins=dict(
+                    start=bins[0],
+                    end=bins[-1],
+                    size=(bins[1] - bins[0])  # Forces exact bin width
                 ),
-                row=subplot_idx[0] if subplot_idx else None,
-                col=subplot_idx[1] if subplot_idx else None
+                name=f'{self.ticker} Returns Distribution'
+            )
+        )
+
+        # configure statsbox position
+        xref = 'paper'
+        yref = 'paper'
+
+        if show_stats:
+            fig.add_annotation(
+                x=0.95,
+                y=0.95,
+                xref=xref,
+                yref=yref,
+                text=stats_text,
+                showarrow=False,
+                font=dict(size=10),
+                align='left',
+                bgcolor='white',
+                bordercolor='black',
+                borderwidth=1,
+                xanchor='right',
+                yanchor='top'
             )
 
-            # configure statsbox position
-            xref = 'paper'
-            yref = 'paper'
+        fig.update_layout(
+            yaxis=dict(
+                range=[0, None],
+                rangemode='nonnegative'
+            ),
+            bargap=0.05
+        )
 
-            if subplot_idx:
-                xref = f'x{subplot_idx[0] if subplot_idx[0] != 1 else ""} domain'
-                yref = f'y{subplot_idx[0] if subplot_idx[0] != 1 else ""} domain'
-
-            if show_stats:
-                fig.add_annotation(
-                    x=0.95,
-                    y=0.95,
-                    xref=xref,
-                    yref=yref,
-                    text=stats_text,
-                    showarrow=False,
-                    font=dict(size=10),
-                    align='left',
-                    bgcolor='white',
-                    bordercolor='black',
-                    borderwidth=1,
-                    xanchor='right',
-                    yanchor='top'
-                )
-
-            fig.update_layout(
-                yaxis=dict(
-                    range=[0, None],
-                    rangemode='nonnegative'
-                ),
-                bargap=0.05
+        fig.update_layout(
+                title=f'{self.ticker} {"Log" if log_rets else ""} Returns Distribution',
+                xaxis_title='Returns',
+                yaxis_title=f'Count'
             )
 
-            if standalone:
-                fig.update_layout(
-                        title=f'{self.ticker} {"Log" if log_rets else ""} Returns Distribution',
-                        xaxis_title='Returns',
-                        yaxis_title=f'Count'
-                    )
-
-                fig.show()
-            else:
-                fig.update_yaxes(
-                    title_text='Count',
-                    row=subplot_idx[0] if subplot_idx else None, 
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-                fig.update_xaxes(
-                    title_text=f'{self.ticker} {"Log" if log_rets else ""} Returns Distribution', 
-                    row=subplot_idx[0] if subplot_idx else None, 
-                    col=subplot_idx[1] if subplot_idx else None
-                )
-
-            if filename is not None:
-                fig.write_image(filename)
+        fig.show()
 
         return fig
 
@@ -1367,4 +896,3 @@ class Asset():
 # simple default dashboard
 # currency conversion
 # remove missing dates using type='category'
-# remove extra customization for plots

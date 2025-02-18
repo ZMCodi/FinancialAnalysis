@@ -79,8 +79,8 @@ class Asset():
                 data = cur.fetchall()
 
                 # get metadata like asset type and currency
-                cur.execute("SELECT asset_type, currency, sector FROM tickers WHERE ticker = %s", (self.ticker,))
-                self.asset_type, self.currency, self.sector = cur.fetchone()
+                cur.execute("SELECT asset_type, currency, sector, timezone FROM tickers WHERE ticker = %s", (self.ticker,))
+                self.asset_type, self.currency, self.sector, self.timezone = cur.fetchone()
 
                 # reindex data and calculate returns and log returns
                 self.daily = pd.DataFrame(data, columns=['date', 'open', 'high', 'low', 'close', 'adj_close', 'volume']).set_index('date')
@@ -98,7 +98,7 @@ class Asset():
                 cur.execute("SELECT date, open, high, low, close, adj_close, volume FROM five_minute WHERE ticker = %s", (self.ticker,))
                 self.five_minute = pd.DataFrame(cur.fetchall(), columns=['date', 'open', 'high', 'low', 'close', 'adj_close', 'volume']).set_index('date')
                 self.five_minute = self.five_minute.astype(float)
-                self.five_minute.index = pd.to_datetime(self.five_minute.index)
+                self.five_minute.index = pd.to_datetime(self.five_minute.index).tz_convert(self.timezone)
                 self.five_minute = self.five_minute.sort_index()
                 self.five_minute['log_rets'] = np.log(self.five_minute['adj_close'] / self.five_minute['adj_close'].shift(1))
                 self.five_minute['rets'] = self.five_minute['adj_close'].pct_change()
@@ -130,6 +130,7 @@ class Asset():
             currency = 'GBP'
             in_pence = True
         start_date = pd.to_datetime('today').date()
+        timezone = ticker.info['timeZoneShortName']
         asset_type = ticker.info['quoteType']
         if asset_type == 'MUTUALFUND':
             asset_type = 'Mutual Fund'
@@ -160,7 +161,7 @@ class Asset():
             else:
                 sector = None
 
-        print(f'Inserting to DB {ticker=}, {comp_name=}, {exchange=}, {currency=}, {asset_type=}, {market_cap=}, {sector=}')
+        print(f'Inserting to DB {ticker=}, {comp_name=}, {exchange=}, {currency=}, {asset_type=}, {market_cap=}, {sector=}, {timezone=}')
 
         # Get daily data from 2020, clean and transform
         daily_data = yf.download(self.ticker, start='2020-01-01', auto_adjust=False)
@@ -205,7 +206,7 @@ class Asset():
                     self.__add_new_currency(cur, conn, currencies, currency)
 
                 # insert metadata into db
-                cur.execute("INSERT INTO tickers (ticker, comp_name, exchange, sector, market_cap, start_date, currency, asset_type) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", (self.ticker, comp_name, exchange, sector, market_cap, start_date, currency, asset_type))
+                cur.execute("INSERT INTO tickers (ticker, comp_name, exchange, sector, market_cap, start_date, currency, asset_type, timezone) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)", (self.ticker, comp_name, exchange, sector, market_cap, start_date, currency, asset_type, timezone))
 
                 # batch insertion for price data
                 BATCH_SIZE = 1000
@@ -282,10 +283,21 @@ class Asset():
             print(f'{self.ticker} is an invalid yfinance ticker')
             return
 
-        self.asset_type = ticker.info['quoteType'].capitalize()
-        self.currency = ticker.info['currency'].upper()
+        asset_type = ticker.info['quoteType']
+        if asset_type == 'MUTUALFUND':
+            asset_type = 'Mutual Fund'
+        elif asset_type != 'ETF':
+            asset_type = asset_type.capitalize()
 
-        daily_data = yf.download(self.ticker, start='2020-01-01')
+        self.asset_type = asset_type
+        self.currency = ticker.info['currency']
+        is_pence = False
+        if self.currency == 'GBp':
+            self.currency = 'GBP'
+            is_pence = True
+        self.timezone = ticker.info['timeZoneShortName']
+
+        daily_data = yf.download(self.ticker, start='2020-01-01', auto_adjust=False)
         daily_data = daily_data.droplevel(1, axis=1)
         clean_daily = self.__clean_data(daily_data)
         clean_daily = clean_daily.rename(columns={'Date': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
@@ -293,6 +305,8 @@ class Asset():
             clean_daily['adj_close'] = clean_daily['close']
         else:
             clean_daily = clean_daily.rename(columns={'Adj Close': 'adj_close'})
+        if is_pence:
+            clean_daily[['open', 'high', 'low', 'close', 'adj_close']] /= 100
 
         self.daily = clean_daily.set_index('date').astype(float)
         self.daily.index = pd.to_datetime(self.daily.index)
@@ -300,7 +314,11 @@ class Asset():
         self.daily['log_rets'] = np.log(self.daily['adj_close'] / self.daily['adj_close'].shift(1))
         self.daily['rets'] = self.daily['adj_close'].pct_change()
 
-        five_min_data = yf.download(self.ticker, interval='5m')
+        if self.asset_type == 'Mutual Fund':
+            self.five_minute = self.daily
+            return
+
+        five_min_data = yf.download(self.ticker, interval='5m', auto_adjust=False)
         five_min_data = five_min_data.droplevel(1, axis=1)
         clean_five_min = self.__clean_data(five_min_data)
         clean_five_min = clean_five_min.rename(columns={'Datetime': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
@@ -308,9 +326,11 @@ class Asset():
             clean_five_min['adj_close'] = clean_five_min['close']
         else:
             clean_five_min = clean_five_min.rename(columns={'Adj Close': 'adj_close'})
+        if is_pence:
+            clean_five_min[['open', 'high', 'low', 'close', 'adj_close']] /= 100
 
         self.five_minute = clean_five_min.set_index('date').astype(float)
-        self.five_minute.index = pd.to_datetime(self.five_minute.index)
+        self.five_minute.index = pd.to_datetime(self.five_minute.index).tz_convert(self.timezone)
         self.five_minute = self.five_minute.sort_index()
         self.five_minute['log_rets'] = np.log(self.five_minute['adj_close'] / self.five_minute['adj_close'].shift(1))
         self.five_minute['rets'] = self.five_minute['adj_close'].pct_change()
@@ -1346,3 +1366,5 @@ class Asset():
 # plot more diagrams
 # simple default dashboard
 # currency conversion
+# remove missing dates using type='category'
+# remove extra customization for plots

@@ -1011,12 +1011,14 @@ class Portfolio:
     def drawdown_ratio(self):
         return self.max_drawdown / self.average_drawdown
 
-    def time_to_recovery(self, min_duration: int = 3, min_depth: float = 0.05):
-        df = self.drawdown_df
+    def time_to_recovery(self, min_duration: int = 3, significance: float = 0.05):
+        df = self.drawdown_df.dropna()
+        min_depth = df['depth'].quantile(1-significance)
         return float(df[(df['duration'] >= min_duration) & (-df['depth'] >= np.abs(min_depth))]['time_to_recovery'].mean())
 
-    def average_drawdown_duration(self, min_duration: int = 3, min_depth: float = 0.05):
+    def average_drawdown_duration(self, min_duration: int = 3, significance: float = 0.05):
         df = self.drawdown_df
+        min_depth = df['depth'].quantile(1-significance)
         return float(df[(df['duration'] >= min_duration) & (-df['depth'] >= np.abs(min_depth))]['duration'].mean())
 
     def drawdown_frequency(self, bins: int = 20):

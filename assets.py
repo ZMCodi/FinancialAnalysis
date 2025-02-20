@@ -757,7 +757,7 @@ class Asset():
         else:
             data = self.daily
 
-        data = data.drop(columns=['rets'])
+        data = data.drop(columns=['rets', 'log_rets'])
         data = data.resample(period).agg({
             'open': 'first',     # First price of the month
             'high': 'max',       # Highest price of the month
@@ -765,10 +765,10 @@ class Asset():
             'close': 'last',     # Last price of the month
             'adj_close': 'last', # Last adjusted price of the month
             'volume': 'sum',     # Total volume for the month
-            'log_rets': 'sum',   # Sum of log returns
         })
 
         data['rets'] = data['adj_close'].pct_change()
+        data['log_rets'] = np.log(data['adj_close'] / data['adj_close'].shift(1))
 
         data = data.dropna()
 

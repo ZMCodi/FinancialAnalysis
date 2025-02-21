@@ -1,11 +1,8 @@
-import yfinance as yf
 import scipy.optimize as sco
 import numpy as np
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import math
 import pandas as pd
-from assets import Asset
 from portfolio import Portfolio
 
 
@@ -13,9 +10,7 @@ class PortfolioOptimizer():
 
     def __init__(self, portfolio: Portfolio, min_alloc: float | None = 0., max_alloc: float | None = 1.):
 
-        # self.data = yf.download(tickers, start=start)['Close'].dropna()
         self.data = pd.DataFrame({asset: asset.daily['adj_close'] for asset in portfolio.assets}).dropna()
-        # self.asset_names = list(self.data.columns)
         self.rets = pd.DataFrame({asset: asset.daily['log_rets'] for asset in portfolio.assets}).dropna()
 
         weights = portfolio.weights
@@ -136,11 +131,12 @@ class PortfolioOptimizer():
                         mode='markers',
                         marker=dict(
                             size=5,
+                            colorbar=dict(title='Sharpe<br>Ratio'),
                             color=((returns - self.r) / volatility),
                             colorscale='RdBu_r',
                             showscale=True,
                         ), 
-                        showlegend=False
+                        # showlegend=False
                     )
                 )
 
@@ -158,30 +154,33 @@ class PortfolioOptimizer():
         return volatility, returns
 
 
-    def efficient_frontier(self, plot=True, I=10000):
-
+    def efficient_frontier(self, plot=True, I=10000, show_cml=True):
         eweights = np.array(self.num_of_assets * (1. / self.num_of_assets,))
 
-        def min_rets(weights):
-            return - self.port_rets(weights)
-
-        cons = ({'type': 'eq', 'fun': lambda x: self.port_vols(x) - t_vol},
-                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1 })
-
-        bnds = tuple((self.min_alloc, self.max_alloc) for x in range(self.num_of_assets))
+        def min_vol(weights):
+            return self.port_vols(weights)
 
         scatter_vols, scatter_rets = self.mcs_port_diagram(I=I, plot=False)
 
-        t_vols = np.linspace(min(scatter_vols), max(scatter_vols), 50)
-        t_rets = []
+        t_rets = np.linspace(min(scatter_rets), max(scatter_rets), 50)
+        t_vols = []
         weights = []
-        for t_vol in t_vols:
-            res = sco.minimize(min_rets, eweights, method='SLSQP',
+        for t_ret in t_rets:
+            cons = (
+                {'type': 'eq', 'fun': lambda x: self.port_rets(x) - t_ret},
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1}
+            )
+
+            bnds = tuple((self.min_alloc, self.max_alloc) for x in range(self.num_of_assets))
+
+            res = sco.minimize(min_vol, eweights, method='SLSQP',
                             bounds=bnds, constraints=cons)
-            t_rets.append(-res['fun'])
+            t_vols.append(res['fun'])
             weights.append(res.x)
 
-        t_rets = np.array(t_rets)
+        t_vols = np.array(t_vols)
+
+        t_vols = np.array(t_vols)
         optimal_weights = np.array(list(self.opt_sharpe_weight.values()))
         if plot:
             fig = go.Figure()
@@ -191,6 +190,7 @@ class PortfolioOptimizer():
                         mode='markers',
                         name='Random Portfolios',
                         marker=dict(
+                            colorbar=dict(title='Sharpe<br>Ratio'),
                             size=5,
                             color=((scatter_rets - self.r) / scatter_vols),
                             colorscale='RdBu_r',
@@ -259,9 +259,39 @@ class PortfolioOptimizer():
                 height=800
             )
 
-            fig.show()
+            # fig.show()
 
         self.t_vols, self.t_rets, self.t_weights = t_vols, t_rets, weights
+
+        if show_cml:
+            opt_weights = np.array(list(self.opt_sharpe_weight.values()))
+            opt_ret = self.port_rets(opt_weights)
+            opt_vol = self.port_vols(opt_weights)
+
+            x = np.linspace(0, max(self.t_vols) * 1.2, 100)  # Extend a bit past the frontier
+            y = self.r + (opt_ret - self.r) * (x / opt_vol)  # Equation of CML
+
+            fig.add_trace(
+                go.Scatter(
+                    x=x, y=y,
+                    mode='lines',
+                    name='Capital Market Line',
+                    line=dict(
+                        color='green',
+                        width=2,
+                        dash='dash'
+                    ),
+                    showlegend=False,
+                    cliponaxis=True
+                )
+            )
+
+            fig.update_layout(
+                xaxis_range=[min(scatter_vols) * 0.9, max(scatter_vols) * 1.1],
+                yaxis_range=[min(scatter_rets) * 0.9, max(scatter_rets) * 1.1]
+            )
+
+            fig.show()
 
         return t_vols, t_rets, weights
 
@@ -286,7 +316,7 @@ class PortfolioOptimizer():
                 'returns': round(float(returns), 3),  
                 'volatility': round(float(volatility), 3), 
                 'weights': weights}
-    
+
     def portfolio_for_returns(self, ret):
         if self.t_rets is None:
             self.efficient_frontier(plot=False)
@@ -301,11 +331,9 @@ class PortfolioOptimizer():
                 'returns': round(float(returns), 3),  
                 'volatility': round(float(volatility), 3), 
                 'weights': weights}
-    
+
     @property
     def min_volatility_portfolio(self):
         min_volatility = min(self.t_vols)
         return self.portfolio_for_volatility(min_volatility)
 
-# TODO: 
-# add capital market line
